@@ -124,9 +124,9 @@ Audiobooks/
 
 ### Cover art
 
-Press **Y** on any audiobook in the browser folder grid to scrape cover art from Open Library. 
+Press **Y** on any audiobook in the browser folder grid to manage cover art & scrape cover art from Open Library. 
 
-You can also add covers manually by placing a `cover.jpg` or `cover.png` in the folder with your audibook .m4b or .mp3 files.
+(You can also add covers manually by placing a `cover.jpg` or `cover.png` in the folder with your audibook .m4b or .mp3 files.)
 
 ---
 
