@@ -1,6 +1,6 @@
 <div align="center">
   <img src="images/StoryBoy_Icon.png" width="120" alt="StoryBoy icon" />
-  <h1>GVU</h1>
+  <h1>StoryBoy</h1>
   <p>Audiobook player for SpruceOS handheld devices</p>
 </div>
 
