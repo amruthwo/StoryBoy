@@ -34,11 +34,13 @@ StoryBoy is a native audiobook player for SpruceOS devices. It has a three-level
 On first launch, StoryBoy scans your media folders and builds its library. Make sure your audibook files are in `/mnt/SDCARD/Media/Audiobooks/`.  StoryBoy uses folders to define audiobooks, so each book will need its own folder, but they can be nested by series.  This was a compromise in order to support audiobooks are split up between multiple .mp3 files.   
 
 > EXAMPLE: /mnt/SDCARD/Media/Audiobooks/Dungeon Crawler Carl/Carl's Doomsday Scenario/Carl's Doomsday Scenario (Book 2).m4b
+
 > EXAMPLE: /mnt/SDCARD/Media/Audiobooks/Dungeon Crawler Carl/The Dungeon Anarchist's Cookbook/DCC.The_Dungeon_Anarchist's_Cookbook_chapter1.mp3, DCC.The_Dungeon_Anarchist's_Cookbook_chapter2.mp3, DCC.The_Dungeon_Anarchist's_Cookbook_chapter3.mp3, ...
 
 Audiobooks that aren't part of a series, or you don't want them to be nested as a series, can be put in the Audiobooks folder:
  
 > EXAMPLE: /mnt/SDCARD/Media/Audiobooks/Animal Farm/Animal Farm - George Orwell.m4b
+
 > EXAMPLE: /mnt/SDCARD/Media/Audiobooks/Change Agent/Change.Agent_ch01.mp3, Change.Agent_ch02.mp3, Change.Agent_ch03.mp3, ...
 
 ---
