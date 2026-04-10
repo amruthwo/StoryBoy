@@ -31,7 +31,7 @@
 2. Extract the zip to your SD card — make sure you have a `/mnt/SDCARD/App/StoryBoy/` folder.
 3. Launch from the SpruceOS app menu.
 
-On first launch, StoryBoy scans your media folders and builds its library. Make sure your audibook files are in `/mnt/SDCARD/Media/Audiobooks/`.  StoryBoy uses folders to define audiobooks, so each book will need its own folder, but they can be nested by series.  This was a compromise in order to support audiobooks that are split up between multiple .mp3 files.   
+On first launch, StoryBoy scans your media folders and builds its library. Make sure your audiobook files are in `/mnt/SDCARD/Media/Audiobooks/`.  StoryBoy uses folders to define audiobooks, so each book will need its own folder, but they can be nested by series.  This was a compromise in order to support audiobooks that are split up between multiple .mp3 files.   
 
 EXAMPLE: 
 ```
@@ -72,7 +72,7 @@ Audiobooks/
 - **Cover art** — automatic use of embedded art, or by downloading from Open Library
 - **Automatic mosaic** — For series, a mosaic is made by tiling book covers
 - **Playback** — Chapter indicators, playback speed (1x, 1.25x, 1.5x, 2x)
-- **Sleep timer** — Sleep timer (10m, 20m, 1h, 2h)
+- **Sleep timer** — Sleep timer (10m, 30m, 1h, 2h)
 - **Screensaver** — Black screen and button lock
 - **Seek** — ±10s / ±60s / or by chapter
 - **Listen history** — remembers where you left off across all audibooks
