@@ -38,11 +38,11 @@ EXAMPLE:
 
 EXAMPLE:
 > /mnt/SDCARD/Media/Audiobooks/Dungeon Crawler Carl/
->>   The Dungeon Anarchist's Cookbook/
->>>     DCC.The_Dungeon_Anarchist's_Cookbook_chapter1.mp3
->>>     DCC.The_Dungeon_Anarchist's_Cookbook_chapter2.mp3
->>>     DCC.The_Dungeon_Anarchist's_Cookbook_chapter3.mp3
->>>     ...
+>>>     . The Dungeon Anarchist's Cookbook/
+>>>     ..  DCC.The_Dungeon_Anarchist's_Cookbook_chapter1.mp3
+>>>     ..  DCC.The_Dungeon_Anarchist's_Cookbook_chapter2.mp3
+>>>     ..  DCC.The_Dungeon_Anarchist's_Cookbook_chapter3.mp3
+>>>     ..  ...
 
 Audiobooks that aren't part of a series, or you don't want them to be nested as a series, can be put in the Audiobooks folder:
  
