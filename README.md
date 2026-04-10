@@ -69,10 +69,10 @@ Audiobooks/
 ## Features
 
 - **File browser** — three-level hierarchy (series → book → files) with folder grid and cover art
-- **Cover art** — automatic use of embedded art, or by downloading from Open Library (press Y on any show)
-- **Automatic Mosaic** — For series, a mosaic is made by tiling the 
+- **Cover art** — automatic use of embedded art, or by downloading from Open Library
+- **Automatic mosaic** — For series, a mosaic is made by tiling book covers
 - **Playback** — Chapter indicators, playback speed (1x, 1.25x, 1.5x, 2x)
-- **Sleep Timer** — Sleep timer (10m, 20m, 1h, 2h)
+- **Sleep timer** — Sleep timer (10m, 20m, 1h, 2h)
 - **Screensaver** — Black screen and button lock
 - **Seek** — ±10s / ±60s / or by chapter
 - **Listen history** — remembers where you left off across all shows
