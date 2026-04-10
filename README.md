@@ -90,6 +90,7 @@ Audiobooks/
 - **A** — open folder / play audiobook
 - **B** — back
 - **Hold D-pad up/down** — fast scroll through long lists
+- **Hold MENU** — show Controls Reference
 
 ### Playback controls
 
