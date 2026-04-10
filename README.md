@@ -97,14 +97,14 @@ Audiobooks/
 |---|---|
 | D-pad left/right | Seek ±10 seconds |
 | D-pad up/down | Brightness ± |
-| L1 | Seek -60 seconds |
-| R1 | Seek +60 seconds |
-| L2 | Previous chapter in current book |
-| R2 | Next chapter in current book |
 | A | Play / Pause |
 | B | Back to browser |
 | X | Cycle sleep timer  |
 | Y | Double-press for screensaver & button lock |
+| L1 | Seek -60 seconds |
+| R1 | Seek +60 seconds |
+| L2 | Previous chapter in current book |
+| R2 | Next chapter in current book |
 | START | Toggle playback speed |
 | SELECT | Reset playback speed to 1x |
 | Volume up/down | Adjust volume |
