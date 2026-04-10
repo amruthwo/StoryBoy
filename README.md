@@ -8,7 +8,7 @@
 
 ![StoryBoy screenshot](images/sb_full1.png)
 
-StoryBoy is a native audiobook player for SpruceOS devices. It has a three-level media browser (series → audiobooks → files),embedded cover art or online cover art fetching, listen history with resume, a clean fullscreen playback UI with OSD, variable playback speed, and sleep timer. It's written in C around FFmpeg and SDL2.
+StoryBoy is a native audiobook player for SpruceOS devices. It has a three-level media browser (series → audiobooks → files), embedded cover art or online cover art fetching, listening history with automatic position saving/resume, a clean fullscreen playback UI with OSD, variable playback speed, and sleep timer. It's written in C around FFmpeg and SDL2.
 
 ---
 
