@@ -8,7 +8,7 @@
 
 ![StoryBoy screenshot](images/sb_full1.png)
 
-StoryBoy is a native audiobook player for SpruceOS devices. It has a three-level media browser (series → audiobooks → files), embedded cover art or online cover art fetching, listening history with automatic position saving/resume, a clean fullscreen playback UI with OSD, variable playback speed, and sleep timer. It's written in C around FFmpeg and SDL2.
+**StoryBoy** is a native audiobook player for SpruceOS devices. It has a three-level media browser (series → audiobooks → files), embedded cover art or online cover art fetching, listening history with automatic position saving/resume, a clean fullscreen playback UI with OSD, variable playback speed, and sleep timer. It's written in C around FFmpeg and SDL2.
 
 ---
 
@@ -28,7 +28,7 @@ StoryBoy is a native audiobook player for SpruceOS devices. It has a three-level
 ## Installation
 
 1. Download the latest release zip from the [Releases](../../releases) page.
-2. Extract the zip to your SD card — make sure you have a `/mnt/SDCARD/App/StoryBoy/`.
+2. Extract the zip to your SD card — make sure you have a `/mnt/SDCARD/App/StoryBoy/` folder.
 3. Launch from the SpruceOS app menu.
 
 On first launch, StoryBoy scans your media folders and builds its library. Make sure your audibook files are in `/mnt/SDCARD/Media/Audiobooks/`.  StoryBoy uses folders to define audiobooks, so each book will need its own folder, but they can be nested by series.  This was a compromise in order to support audiobooks that are split up between multiple .mp3 files.   
