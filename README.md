@@ -31,7 +31,7 @@ StoryBoy is a native audiobook player for SpruceOS devices. It has a three-level
 2. Extract the zip to your SD card — make sure you have a `/mnt/SDCARD/App/StoryBoy/`.
 3. Launch from the SpruceOS app menu.
 
-On first launch, StoryBoy scans your media folders and builds its library. Make sure your audibook files are in `/mnt/SDCARD/Media/Audiobooks/`.  StoryBoy uses folders to define audiobooks, so each book will need its own folder, but they can be nested by series.  This was a compromise in order to support audiobooks are split up between multiple .mp3 files.   
+On first launch, StoryBoy scans your media folders and builds its library. Make sure your audibook files are in `/mnt/SDCARD/Media/Audiobooks/`.  StoryBoy uses folders to define audiobooks, so each book will need its own folder, but they can be nested by series.  This was a compromise in order to support audiobooks that are split up between multiple .mp3 files.   
 
 EXAMPLE: 
 ```
