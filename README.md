@@ -75,7 +75,7 @@ Audiobooks/
 - **Sleep timer** — Sleep timer (10m, 30m, 1h, 2h)
 - **Screensaver** — Black screen and button lock
 - **Seek** — ±10s / ±60s / or by chapter
-- **Listen history** — remembers where you left off across all audibooks
+- **Listen history** — remembers where you left off across all audiobooks
 - **Themes** — ten color themes, cycle with R1 in the browser
 - **OSD** — progress bar, current time, title, volume
 - **Status bar** — clock, title, WiFi signal, battery level
@@ -126,7 +126,7 @@ Audiobooks/
 
 Press **Y** on any audiobook in the browser folder grid to manage cover art & scrape cover art from Open Library. 
 
-(You can also add covers manually by placing a `cover.jpg` or `cover.png` in the folder with your audibook .m4b or .mp3 files.)
+(You can also add covers manually by placing a `cover.jpg` or `cover.png` in the folder with your audiobook .m4b or .mp3 files.)
 
 ---
 
