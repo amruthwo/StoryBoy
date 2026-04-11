@@ -1,0 +1,23 @@
+# Build outputs
+build/
+storyboy
+storyboy32
+storyboy64
+
+# Release packages
+*.zip
+
+# Downloaded dependency tarballs (fetched at build time)
+cross-compile/deps/
+
+# API keys (injected via CI secrets or local file)
+resources/api/
+
+# Logs
+*.log
+
+# Editor / OS artifacts
+.DS_Store
+*.swp
+*.swo
+*~

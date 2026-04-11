@@ -1,0 +1,182 @@
+name: Build StoryBoy
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-a30:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/storyboy-builder-a30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lowercase image name
+        run: echo "IMAGE=$(echo $IMAGE | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download vendored deps
+        run: |
+          mkdir -p cross-compile/deps
+          wget -q -O cross-compile/deps/openssl-1.1.1w.tar.gz \
+            "https://github.com/openssl/openssl/releases/download/OpenSSL_1_1_1w/openssl-1.1.1w.tar.gz"
+          wget -q -O cross-compile/deps/curl-8.7.1.tar.gz \
+            "https://curl.se/download/curl-8.7.1.tar.gz"
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: cross-compile/miyoo-a30/Dockerfile.storyboy
+          push: true
+          tags: ${{ env.IMAGE }}:latest
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
+
+      - name: Build inside Docker
+        run: |
+          mkdir -p build
+          docker run --rm -v ${{ github.workspace }}:/storyboy \
+            ${{ env.IMAGE }}:latest \
+            sh /storyboy/cross-compile/miyoo-a30/build_inside_docker.sh
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: storyboy-a30
+          path: |
+            build/storyboy32
+            build/fetch_cover32
+            build/libs32/
+            build/libs32_a30/
+
+  build-brick:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/storyboy-builder-brick
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lowercase image name
+        run: echo "IMAGE=$(echo $IMAGE | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download vendored deps
+        run: |
+          mkdir -p cross-compile/deps
+          wget -q -O cross-compile/deps/openssl-1.1.1w.tar.gz \
+            "https://github.com/openssl/openssl/releases/download/OpenSSL_1_1_1w/openssl-1.1.1w.tar.gz"
+          wget -q -O cross-compile/deps/curl-8.7.1.tar.gz \
+            "https://curl.se/download/curl-8.7.1.tar.gz"
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: cross-compile/trimui-brick/Dockerfile.storyboy
+          push: true
+          tags: ${{ env.IMAGE }}:latest
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
+
+      - name: Build inside Docker
+        run: |
+          mkdir -p build
+          docker run --rm -v ${{ github.workspace }}:/storyboy \
+            ${{ env.IMAGE }}:latest \
+            sh /storyboy/cross-compile/trimui-brick/build_inside_docker.sh
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: storyboy-brick
+          path: |
+            build/storyboy64
+            build/fetch_cover64
+            build/libs64/
+
+  package:
+    needs: [build-a30, build-brick]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine version and release target
+        id: release_info
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "version=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "release_tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "is_tag=true" >> $GITHUB_OUTPUT
+          else
+            echo "version=${{ github.sha }}" >> $GITHUB_OUTPUT
+            echo "release_tag=latest" >> $GITHUB_OUTPUT
+            echo "is_tag=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Ensure release exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ steps.release_info.outputs.is_tag }}" = "true" ]; then
+            gh release create "${{ steps.release_info.outputs.release_tag }}" \
+              --title "StoryBoy ${{ steps.release_info.outputs.release_tag }}" \
+              --notes "StoryBoy universal build for SpruceOS — ${{ steps.release_info.outputs.release_tag }}" \
+              2>/dev/null || true
+          else
+            gh release view latest >/dev/null 2>&1 || \
+              gh release create latest \
+                --title "Latest Build" \
+                --notes "StoryBoy universal build for SpruceOS (latest)" \
+              || true
+          fi
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: build
+          merge-multiple: true
+
+      - name: Package universal zip
+        run: |
+          sh cross-compile/universal/package_storyboy_universal.sh "${{ steps.release_info.outputs.version }}"
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ZIP=$(ls storyboy_spruce_universal_v*.zip 2>/dev/null | head -1)
+          if [ -z "$ZIP" ]; then
+            echo "::error::No zip file found"
+            exit 1
+          fi
+          # Upload the versioned zip
+          gh release upload "${{ steps.release_info.outputs.release_tag }}" "$ZIP" --clobber
+          # Also upload as StoryBoy.zip for a stable download URL
+          cp "$ZIP" StoryBoy.zip
+          gh release upload "${{ steps.release_info.outputs.release_tag }}" StoryBoy.zip --clobber

@@ -1,0 +1,7 @@
+{
+  "label": "StoryBoy",
+  "icon": "icon.png",
+  "launch": "launch.sh",
+  "description": "Audiobook player for SpruceOS",
+  "hideInSimpleMode": false
+}

@@ -1,0 +1,213 @@
+FROM debian:bullseye
+# -------------------------------------------------------------------------
+# GVU Trimui Brick cross-compile image
+# Target: aarch64-linux-gnu, glibc 2.33 (device ships 2.33)
+# Builds SDL2, SDL2_image, SDL2_ttf, and FFmpeg from source as static libs.
+# Output: /opt/brick/  — static libs + headers
+# Binary: gvu64 — links only libc/libm/libpthread/libdl + dlopen libasound
+# No VERNEED patching needed (device glibc 2.33 is modern).
+# -------------------------------------------------------------------------
+
+RUN dpkg --add-architecture arm64 && \
+    apt-get update && apt-get install -y \
+        make cmake wget ca-certificates xz-utils python3 zip \
+        gcc-aarch64-linux-gnu \
+        g++-aarch64-linux-gnu \
+        pkg-config \
+        zlib1g-dev:arm64 \
+        libasound2-dev:arm64 \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV CROSS=aarch64-linux-gnu
+ENV CFLAGS_ARCH="-march=armv8-a -O2"
+ENV PREFIX=/opt/brick
+ENV PKG_CONFIG_PATH=/opt/brick/lib/pkgconfig
+ENV PKG_CONFIG_LIBDIR=/opt/brick/lib/pkgconfig
+ENV PKG_CONFIG_SYSROOT_DIR=
+
+# ---- SDL2 2.26.5 — dummy video + ALSA audio (dlopen at runtime) ----------
+RUN wget -q https://libsdl.org/release/SDL2-2.26.5.tar.gz && \
+    tar xf SDL2-2.26.5.tar.gz && \
+    mkdir SDL2-2.26.5/bld && cd SDL2-2.26.5/bld && \
+    ../configure \
+        --host=$CROSS --prefix=$PREFIX \
+        --enable-static --disable-shared \
+        --disable-video-opengl \
+        --disable-video-opengles \
+        --disable-video-x11 \
+        --disable-video-wayland \
+        --disable-video-kmsdrm \
+        --disable-video-directfb \
+        --disable-pulseaudio \
+        --disable-nas \
+        --disable-esd \
+        --disable-jack \
+        --disable-pipewire \
+        --disable-dbus \
+        --enable-alsa \
+        --disable-hidapi \
+        --disable-ime \
+        CC=$CROSS-gcc \
+        CFLAGS="$CFLAGS_ARCH" \
+    && make -j$(nproc) install && cd / && rm -rf SDL2-2.26.5*
+
+# ---- libjpeg-turbo 2.1.5.1 (for SDL2_image) ------------------------------
+RUN wget -q https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/2.1.5.1/libjpeg-turbo-2.1.5.1.tar.gz && \
+    tar xf libjpeg-turbo-2.1.5.1.tar.gz && \
+    cmake -S libjpeg-turbo-2.1.5.1 -B ljt-bld \
+        -DCMAKE_C_COMPILER=$CROSS-gcc \
+        -DCMAKE_SYSTEM_NAME=Linux \
+        -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+        -DCMAKE_C_FLAGS="$CFLAGS_ARCH" \
+        -DCMAKE_INSTALL_PREFIX=$PREFIX \
+        -DENABLE_SHARED=OFF -DENABLE_STATIC=ON \
+        -DWITH_TURBOJPEG=OFF && \
+    cmake --build ljt-bld -j$(nproc) && cmake --install ljt-bld && \
+    rm -rf libjpeg-turbo-* ljt-bld
+
+# ---- libpng 1.6.39 -------------------------------------------------------
+RUN wget -q https://download.sourceforge.net/libpng/libpng-1.6.39.tar.gz && \
+    tar xf libpng-1.6.39.tar.gz && \
+    mkdir libpng-1.6.39/bld && cd libpng-1.6.39/bld && \
+    ../configure --host=$CROSS --prefix=$PREFIX \
+        --enable-static --disable-shared \
+        CC=$CROSS-gcc CFLAGS="$CFLAGS_ARCH" \
+    && make -j$(nproc) install && cd / && rm -rf libpng-*
+
+# ---- FreeType 2.13.0 -----------------------------------------------------
+RUN wget -q https://download.savannah.gnu.org/releases/freetype/freetype-2.13.0.tar.gz && \
+    tar xf freetype-2.13.0.tar.gz && \
+    mkdir freetype-2.13.0/bld && cd freetype-2.13.0/bld && \
+    ../configure --host=$CROSS --prefix=$PREFIX \
+        --enable-static --disable-shared \
+        --without-harfbuzz \
+        CC=$CROSS-gcc CFLAGS="$CFLAGS_ARCH" \
+    && make -j$(nproc) install && cd / && rm -rf freetype-*
+
+# ---- SDL2_image 2.6.3 ----------------------------------------------------
+RUN wget -q https://libsdl.org/projects/SDL_image/release/SDL2_image-2.6.3.tar.gz && \
+    tar xf SDL2_image-2.6.3.tar.gz && \
+    mkdir SDL2_image-2.6.3/bld && cd SDL2_image-2.6.3/bld && \
+    ../configure --host=$CROSS --prefix=$PREFIX \
+        --enable-static --disable-shared \
+        --disable-jpg-shared --enable-jpg \
+        --disable-png-shared --enable-png \
+        --disable-webp --disable-avif --disable-jxl --disable-tif \
+        CC=$CROSS-gcc \
+        CFLAGS="$CFLAGS_ARCH -I$PREFIX/include" \
+        LDFLAGS="-L$PREFIX/lib" \
+        SDL2_CFLAGS="$(pkg-config --cflags sdl2)" \
+        SDL2_LIBS="$(pkg-config --libs sdl2)" \
+    && make -j$(nproc) install && cd / && rm -rf SDL2_image-*
+
+# ---- SDL2_ttf 2.20.2 -----------------------------------------------------
+RUN wget -q https://libsdl.org/projects/SDL_ttf/release/SDL2_ttf-2.20.2.tar.gz && \
+    tar xf SDL2_ttf-2.20.2.tar.gz && \
+    mkdir SDL2_ttf-2.20.2/bld && cd SDL2_ttf-2.20.2/bld && \
+    ../configure --host=$CROSS --prefix=$PREFIX \
+        --enable-static --disable-shared \
+        CC=$CROSS-gcc CXX=$CROSS-g++ \
+        CFLAGS="$CFLAGS_ARCH -I$PREFIX/include" \
+        CXXFLAGS="$CFLAGS_ARCH -I$PREFIX/include" \
+        LDFLAGS="-L$PREFIX/lib" \
+        SDL2_CFLAGS="$(pkg-config --cflags sdl2)" \
+        SDL2_LIBS="$(pkg-config --libs sdl2)" \
+        FT2_CFLAGS="$(pkg-config --cflags freetype2)" \
+        FT2_LIBS="$(pkg-config --libs freetype2)" \
+    && make -j$(nproc) install && cd / && rm -rf SDL2_ttf-*
+
+# ---- FFmpeg 5.1.6 — minimal static build ---------------------------------
+RUN wget -q https://ffmpeg.org/releases/ffmpeg-5.1.6.tar.gz && \
+    tar xf ffmpeg-5.1.6.tar.gz && \
+    cd ffmpeg-5.1.6 && \
+    ./configure \
+        --arch=aarch64 --target-os=linux \
+        --cross-prefix=$CROSS- \
+        --enable-cross-compile \
+        --cpu=cortex-a55 \
+        --enable-runtime-cpudetect \
+        --prefix=$PREFIX \
+        --enable-static --disable-shared \
+        --disable-programs --disable-doc \
+        --disable-everything \
+        --enable-decoder=h264 \
+        --enable-decoder=hevc \
+        --enable-decoder=vp8 \
+        --enable-decoder=vp9 \
+        --enable-decoder=av1 \
+        --enable-decoder=mpeg4 \
+        --enable-decoder=mpeg2video \
+        --enable-decoder=mjpeg \
+        --enable-decoder=aac \
+        --enable-decoder=mp3float \
+        --enable-decoder=mp3 \
+        --enable-decoder=vorbis \
+        --enable-decoder=flac \
+        --enable-decoder=opus \
+        --enable-decoder=ac3 \
+        --enable-decoder=eac3 \
+        --enable-decoder=dca \
+        --enable-decoder=truehd \
+        --enable-decoder=pcm_s16le --enable-decoder=pcm_s24le \
+        --enable-decoder=pcm_f32le --enable-decoder=pcm_s16be \
+        --enable-demuxer=mov --enable-demuxer=matroska \
+        --enable-demuxer=mp4 --enable-demuxer=avi \
+        --enable-demuxer=flv  --enable-demuxer=ogg \
+        --enable-demuxer=mp3  --enable-demuxer=wav \
+        --enable-demuxer=flac --enable-demuxer=aac \
+        --enable-demuxer=mpegts --enable-demuxer=mpegvideo \
+        --enable-demuxer=hls  --enable-demuxer=pcm_s16le \
+        --enable-parser=h264  --enable-parser=hevc \
+        --enable-parser=vp8   --enable-parser=vp9 \
+        --enable-parser=av1   --enable-parser=mpeg4video \
+        --enable-parser=aac   --enable-parser=mpegaudio \
+        --enable-parser=vorbis --enable-parser=flac \
+        --enable-parser=opus  --enable-parser=ac3 \
+        --enable-protocol=file \
+        --enable-swscale \
+        --enable-swresample \
+        --enable-avfilter \
+        --enable-filter=atempo \
+        --enable-filter=aresample \
+        --enable-avformat \
+        --enable-avcodec \
+        --enable-avutil \
+        --extra-cflags="$CFLAGS_ARCH" \
+        --extra-ldflags="$CFLAGS_ARCH" \
+    && make -j$(nproc) install && \
+    cd / && rm -rf ffmpeg-*
+
+# ---- OpenSSL 1.1.1w — TLS backend for libcurl (matches device system OpenSSL) ---
+COPY cross-compile/deps/openssl-1.1.1w.tar.gz /tmp/
+RUN tar xf /tmp/openssl-1.1.1w.tar.gz && \
+    cd openssl-1.1.1w && \
+    ./Configure linux-aarch64 \
+        --cross-compile-prefix=${CROSS}- \
+        --prefix=${PREFIX} --openssldir=${PREFIX}/ssl \
+        no-shared no-tests \
+        ${CFLAGS_ARCH} && \
+    make -j$(nproc) && make install_sw && \
+    cd / && rm -rf openssl-1.1.1w* /tmp/openssl-1.1.1w.tar.gz
+
+# ---- libcurl 8.7.1 — static, OpenSSL backend, HTTPS only -------------------
+COPY cross-compile/deps/curl-8.7.1.tar.gz /tmp/
+RUN tar xf /tmp/curl-8.7.1.tar.gz && \
+    mkdir curl-8.7.1/bld && cd curl-8.7.1/bld && \
+    ../configure \
+        --host=${CROSS} --prefix=${PREFIX} \
+        --enable-static --disable-shared \
+        --with-openssl=${PREFIX} \
+        --without-gnutls \
+        --with-ca-bundle=/mnt/SDCARD/spruce/etc/ca-certificates.crt \
+        --disable-ftp --disable-ldap --disable-ldaps \
+        --disable-rtsp --disable-dict --disable-telnet --disable-tftp \
+        --disable-pop3 --disable-imap --disable-smtp --disable-gopher \
+        --disable-mqtt --disable-manual --disable-docs \
+        --without-libidn2 --without-libpsl \
+        CC=${CROSS}-gcc \
+        CFLAGS="${CFLAGS_ARCH}" \
+        CPPFLAGS="-I${PREFIX}/include" \
+        LDFLAGS="-L${PREFIX}/lib" \
+    && make -j$(nproc) install && cd / && rm -rf curl-8.7.1* /tmp/curl-8.7.1.tar.gz
+
+WORKDIR /storyboy
