@@ -125,11 +125,16 @@ static int has_subdirs(const char *path) {
  * ---------------------------------------------------------------------- */
 
 static char *find_cover(const char *dir) {
+    /* cover_embedded.jpg is written by extract_cover (embedded art from the
+       audio file itself) and takes priority over cover.jpg which may have
+       been written by fetch_cover (Open Library). cover.png is user-placed. */
+    char *cemb = path_join(dir, "cover_embedded.jpg");
     char *cjpg = path_join(dir, "cover.jpg");
     char *cpng = path_join(dir, "cover.png");
-    if (cjpg && path_exists(cjpg)) { free(cpng); return cjpg; }
-    if (cpng && path_exists(cpng)) { free(cjpg); return cpng; }
-    free(cjpg); free(cpng);
+    if (cemb && path_exists(cemb)) { free(cjpg); free(cpng); return cemb; }
+    if (cjpg && path_exists(cjpg)) { free(cemb); free(cpng); return cjpg; }
+    if (cpng && path_exists(cpng)) { free(cemb); free(cjpg); return cpng; }
+    free(cemb); free(cjpg); free(cpng);
     return NULL;
 }
 

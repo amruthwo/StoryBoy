@@ -984,11 +984,16 @@ int main(int argc, char *argv[]) {
                     }
 
                     if ((act == SDLK_RETURN || act == SDLK_SPACE) && fpath) {
-                        /* A — fetch art */
+                        /* A — fetch art: lock out embedded re-extraction so the
+                           Open Library cover persists across restarts */
                         char covpath[1280];
+                        snprintf(covpath, sizeof(covpath), "%s/.sb_cover_locked", fpath);
+                        { FILE *lf = fopen(covpath, "w"); if (lf) fclose(lf); }
                         snprintf(covpath, sizeof(covpath), "%s/cover.jpg", fpath);
                         remove(covpath);
                         snprintf(covpath, sizeof(covpath), "%s/cover.png", fpath);
+                        remove(covpath);
+                        snprintf(covpath, sizeof(covpath), "%s/cover_embedded.jpg", fpath);
                         remove(covpath);
                         /* Clear cached texture */
                         if (is_season) {
@@ -1003,11 +1008,16 @@ int main(int argc, char *argv[]) {
                         cover_fetch_async(fname, NULL, fpath);
                         mode = MODE_BROWSER;
                     } else if (act == SDLK_LALT && fpath) {
-                        /* X — clear art only */
+                        /* X — clear art: write lock sentinel so extract_cover
+                           does not re-extract embedded art on the next restart */
                         char covpath[1280];
+                        snprintf(covpath, sizeof(covpath), "%s/.sb_cover_locked", fpath);
+                        { FILE *lf = fopen(covpath, "w"); if (lf) fclose(lf); }
                         snprintf(covpath, sizeof(covpath), "%s/cover.jpg", fpath);
                         remove(covpath);
                         snprintf(covpath, sizeof(covpath), "%s/cover.png", fpath);
+                        remove(covpath);
+                        snprintf(covpath, sizeof(covpath), "%s/cover_embedded.jpg", fpath);
                         remove(covpath);
                         if (is_season) {
                             if (si < cache.season_tex_count && cache.season_textures[si]) {

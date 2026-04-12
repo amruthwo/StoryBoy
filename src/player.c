@@ -390,16 +390,23 @@ int player_update(Player *p) {
     if (!p->eos && p->audio.eos)
         p->eos = 1;
 
-    /* Async cover reload — poll for cover.jpg once the fetch_cover binary writes it.
+    /* Async cover reload — poll for cover once the background processes write it.
+       cover_embedded.jpg (from extract_cover) takes priority over cover.jpg
+       (from fetch_cover / Open Library).
        Check every ~2 seconds to avoid stat() overhead every frame. */
     static Uint32 cover_poll_at = 0;
     if (!p->cover_tex && p->cover_book_dir[0] && p->renderer &&
         now >= cover_poll_at) {
         cover_poll_at = now + 2000;
         char cpath[1280];
-        snprintf(cpath, sizeof(cpath), "%s/cover.jpg", p->cover_book_dir);
-        if (cover_fetch_done(cpath))
+        snprintf(cpath, sizeof(cpath), "%s/cover_embedded.jpg", p->cover_book_dir);
+        if (cover_fetch_done(cpath)) {
             p->cover_tex = cover_load_file(p->renderer, cpath);
+        } else {
+            snprintf(cpath, sizeof(cpath), "%s/cover.jpg", p->cover_book_dir);
+            if (cover_fetch_done(cpath))
+                p->cover_tex = cover_load_file(p->renderer, cpath);
+        }
     }
 
     return 0;

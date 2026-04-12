@@ -226,11 +226,18 @@ static SDL_Texture *get_cover(SDL_Renderer *renderer, CoverCache *cache,
     const char *cover_path = f->cover;
     char fallback[1280];
     if (!cover_path) {
-        /* cover was absent at scan time — check if async fetch has since written it */
-        snprintf(fallback, sizeof(fallback), "%s/cover.jpg", f->path);
+        /* cover was absent at scan time — check if a background process has
+           since written one.  cover_embedded.jpg (extract_cover) takes
+           priority over cover.jpg (fetch_cover / Open Library). */
+        snprintf(fallback, sizeof(fallback), "%s/cover_embedded.jpg", f->path);
         if (access(fallback, F_OK) == 0)
             cover_path = fallback;
-        else {
+        if (!cover_path) {
+            snprintf(fallback, sizeof(fallback), "%s/cover.jpg", f->path);
+            if (access(fallback, F_OK) == 0)
+                cover_path = fallback;
+        }
+        if (!cover_path) {
             snprintf(fallback, sizeof(fallback), "%s/cover.png", f->path);
             if (access(fallback, F_OK) == 0)
                 cover_path = fallback;

@@ -119,6 +119,9 @@ SDL_Texture *cover_load(SDL_Renderer *renderer, const char *audio_path) {
     if (dir[0]) {
         char p[1200];
         SDL_Texture *tex;
+        snprintf(p, sizeof(p), "%s/cover_embedded.jpg", dir);
+        tex = load_texture_file_scaled(renderer, p);
+        if (tex) return tex;
         snprintf(p, sizeof(p), "%s/cover.jpg", dir);
         tex = load_texture_file_scaled(renderer, p);
         if (tex) return tex;

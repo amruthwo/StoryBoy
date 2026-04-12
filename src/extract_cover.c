@@ -63,11 +63,19 @@ static int extract_to_file(const char *audio_path, const char *dest) {
 }
 
 static void process_dir(const char *dir) {
-    /* Skip if a cover already exists — preserve user-placed artwork */
-    char cover_jpg[1280], cover_png[1280];
-    snprintf(cover_jpg, sizeof(cover_jpg), "%s/cover.jpg", dir);
+    /* Skip if the user has explicitly chosen cover art for this dir.
+       .sb_cover_locked is written by StoryBoy when the user fetches art
+       via the "A — fetch art" menu action; it prevents embedded art from
+       overriding the user's choice across restarts. */
+    char locked[1280];
+    snprintf(locked, sizeof(locked), "%s/.sb_cover_locked", dir);
+    if (file_exists(locked)) return;
+
+    /* Skip if we've already extracted embedded art or user placed cover.png */
+    char cover_embedded[1280], cover_png[1280];
+    snprintf(cover_embedded, sizeof(cover_embedded), "%s/cover_embedded.jpg", dir);
     snprintf(cover_png, sizeof(cover_png), "%s/cover.png", dir);
-    if (file_exists(cover_jpg) || file_exists(cover_png))
+    if (file_exists(cover_embedded) || file_exists(cover_png))
         return;
 
     /* Find first audio file */
@@ -85,8 +93,10 @@ static void process_dir(const char *dir) {
 
     if (!audio[0]) return;
 
-    if (extract_to_file(audio, cover_jpg))
-        fprintf(stderr, "extracted: %s\n", cover_jpg);
+    /* Write to cover_embedded.jpg — this file is owned by extract_cover
+       and takes priority over cover.jpg (Open Library) in the browser. */
+    if (extract_to_file(audio, cover_embedded))
+        fprintf(stderr, "extracted: %s\n", cover_embedded);
 }
 
 int main(int argc, char **argv) {
