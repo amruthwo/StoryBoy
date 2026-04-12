@@ -69,6 +69,12 @@ typedef struct {
     SDL_mutex         *clock_mutex;
     int                out_rate;    /* actual SDL device sample rate (may differ from
                                        AUDIO_OUT_RATE if device only supports 44100Hz) */
+#ifdef SB_A30
+    /* Callback rate diagnostics — written from SDL audio thread, read nowhere
+       safety: fields only read/written atomically; no mutex needed here */
+    _Atomic int        cb_count;   /* incremented each callback */
+    _Atomic int        cb_t0;      /* SDL_GetTicks() at first callback */
+#endif
 
     /* Playback speed via atempo filter — 1.0 = passthrough (no filter graph).
        Written by main thread (audio_set_speed), read by decode thread. */

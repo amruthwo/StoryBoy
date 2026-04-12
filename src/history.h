@@ -6,7 +6,7 @@
 #include "theme.h"
 
 /* -------------------------------------------------------------------------
- * History page — shows In Progress + Recently Watched lists read from
+ * History page — shows In Progress + Recently Finished lists read from
  * resume.dat and history.dat.
  * ---------------------------------------------------------------------- */
 

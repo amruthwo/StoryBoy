@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include <stdatomic.h>
 #include <SDL2/SDL.h>
 #include <libavformat/avformat.h>
 
@@ -35,6 +36,13 @@ typedef struct PacketNode {
     AVPacket        *pkt;   /* NULL = EOS or flush sentinel (check .flush) */
     int              flush; /* 1 = seek flush (codec flush + continue),
                                0 = EOS (exit decode thread)                 */
+    int64_t          flush_pts; /* exact seek target in stream timebase units;
+                                   AV_NOPTS_VALUE if unknown.  Carried to the
+                                   audio decode thread so it can fast-discard
+                                   frames that precede the true seek target
+                                   (chunk-level index entries span ~2 min, so
+                                   av_seek_frame lands on the chunk start, not
+                                   the exact position). */
     struct PacketNode *next;
 } PacketNode;
 
@@ -45,6 +53,11 @@ typedef struct {
     int          interrupt; /* set by demux_request_seek: causes pq_enqueue to
                                return -1 immediately so the demux thread exits
                                any blocked put and reaches the seek check fast */
+    _Atomic int  flush_gen; /* incremented each time a flush sentinel is enqueued;
+                               the audio decode thread checks this after each frame
+                               and breaks the inner decode loop when it changes,
+                               allowing seeks to be processed within ~185ms even
+                               while the audio thread is blocked in ring_write */
     SDL_mutex   *mutex;
     SDL_cond    *not_empty;
     SDL_cond    *not_full;
@@ -54,7 +67,8 @@ void packet_queue_init     (PacketQueue *q);
 int  packet_queue_put      (PacketQueue *q, AVPacket *pkt);
 /* Returns: 1 = packet, 0 = flush sentinel, -1 = abort */
 int  packet_queue_get      (PacketQueue *q, AVPacket *out);
-void packet_queue_put_flush(PacketQueue *q);   /* seek flush sentinel */
+/* flush_pts: exact seek target in stream timebase (AV_NOPTS_VALUE if unknown) */
+void packet_queue_put_flush(PacketQueue *q, int64_t flush_pts);
 void packet_queue_flush    (PacketQueue *q);
 void packet_queue_abort    (PacketQueue *q);
 void packet_queue_destroy  (PacketQueue *q);

@@ -30,19 +30,26 @@ elif [ "$PLATFORM" = "MiyooMini" ]; then
     echo "MiyooMini V2/V3 detected" >> "$LOG"
 fi
 
-# A30 needs a GLIBC_2.23-compatible SDL2 (patched VERNEED); all other armhf
-# devices (MiyooMini family) have glibc 2.28+ and use the unpatched build.
+# Library path setup.
+# A30 needs its VERNEED-patched SDL2 (glibc 2.23 compat) prepended first.
+# MiyooMini V2/V3 need SpruceOS's mmiyoo SDL2 prepended first so the mmiyoo
+# audio backend is used — our lib32 SDL2 (ALSA) is still appended as fallback
+# for any other .so deps.  All other armhf devices use our lib32 SDL2.
 if [ "$PLATFORM" = "A30" ]; then
     export LD_LIBRARY_PATH="$APPDIR/lib32_a30:$LIBDIR:/usr/lib:$LD_LIBRARY_PATH"
+    export SDL_VIDEODRIVER=dummy
+elif [ "$PLATFORM" = "MiyooMini" ] && [ "$MIYOO_V4" = "0" ]; then
+    # V2/V3: use our lib32 SDL2 (ALSA backend) to avoid loading mmiyoo's GPU libs
+    # (libEGL, libGLESv2, libmi_gfx, etc.) which exhaust the ~100MB RAM budget.
+    export LD_LIBRARY_PATH="$LIBDIR:/usr/lib:$LD_LIBRARY_PATH"
+    export SDL_VIDEODRIVER=dummy
+    echo "V2/V3: using lib32 SDL2 + ALSA" >> "$LOG"
 else
     export LD_LIBRARY_PATH="$LIBDIR:/usr/lib:$LD_LIBRARY_PATH"
+    export SDL_VIDEODRIVER=dummy
 fi
-export SDL_VIDEODRIVER=dummy
 
-# On Miyoo Flip and Miyoo Mini family, audioserver or PyUI holds the default
-# audio device. Override .asoundrc to use plughw:0,0 which opens hw:0,0
-# directly, bypassing dmix and audioserver's OSS claim on /dev/dsp.
-# On Brick and A30, force OSS (/dev/dsp) which is the working audio path.
+# Audio driver per device.
 export HOME=/tmp/storyboy_home
 mkdir -p "$HOME"
 if [ "$PLATFORM" = "Flip" ]; then
@@ -63,11 +70,17 @@ elif [ "$PLATFORM" = "MiyooMini" ] && [ "$MIYOO_V4" = "1" ]; then
     export LD_PRELOAD="/customer/lib/libpadsp.so"
     export SDL_AUDIODRIVER=dsp
 elif [ "$PLATFORM" = "MiyooMini" ]; then
-    # V2/V3: mmiyoo audio is only in SpruceOS's SDL2, which lacks dummy video.
-    # We can't use both simultaneously without building our own SDL2 with the
-    # mmiyoo backend. Run silent — video works, no audio.
-    echo "V2/V3 audio: silent (mmiyoo requires SpruceOS SDL2, incompatible with dummy video)" >> "$LOG"
-    export SDL_AUDIODRIVER=dummy
+    # V2/V3: kill audioserver so ALSA hw:0,0 is free, then use ALSA directly.
+    killall audioserver 2>/dev/null
+    sleep 0.5
+    # Log whether audioserver is still running after kill
+    if pgrep audioserver > /dev/null 2>&1; then
+        echo "V2/V3: audioserver still running after kill" >> "$LOG"
+    else
+        echo "V2/V3: audioserver stopped" >> "$LOG"
+    fi
+    export SDL_AUDIODRIVER=alsa
+    export AUDIODEV=hw:0,0
 else
     # Brick, A30, etc.: Force OSS (/dev/dsp).
     export SDL_AUDIODRIVER=dsp
@@ -130,11 +143,31 @@ echo "launching $BIN" >> "$LOG"
 
 sleep 0.5
 
+# V2/V3: enable swap so FFmpeg can allocate large stsz tables (e.g. 12MB for
+# "Children of Strife"). Without swap, av_malloc fails and Lavf57 silently sets
+# sample_count=0, causing immediate EOF.  The swap is only hit during moov
+# parsing (~12MB burst), then stays idle; SD card wear is negligible.
+if [ "$PLATFORM" = "MiyooMini" ] && [ "$MIYOO_V4" = "0" ]; then
+    SWAP_FILE="$APPDIR/storyboy.swap"
+    if [ ! -f "$SWAP_FILE" ]; then
+        echo "V2/V3: creating 32MB swap file..." >> "$LOG"
+        dd if=/dev/zero of="$SWAP_FILE" bs=1M count=32 2>/dev/null
+        chmod 600 "$SWAP_FILE"
+        mkswap "$SWAP_FILE" >> "$LOG" 2>&1
+    fi
+    swapon "$SWAP_FILE" 2>/dev/null && echo "V2/V3: swap enabled" >> "$LOG"
+fi
+
 # Clear fb0 to black before StoryBoy starts so no stale content is visible.
 dd if=/dev/zero of=/dev/fb0 2>/dev/null || true
 
 "$BIN" >> "$LOG" 2>&1
 echo "storyboy exited: $?" >> "$LOG"
+
+# V2/V3: disable swap after exit
+if [ "$PLATFORM" = "MiyooMini" ] && [ "$MIYOO_V4" = "0" ]; then
+    swapoff "$APPDIR/storyboy.swap" 2>/dev/null
+fi
 
 # Clean up battery poller if started
 if [ -n "$BATTERY_POLLER_PID" ]; then

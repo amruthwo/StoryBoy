@@ -235,12 +235,17 @@ static void scan_dir(MediaLibrary *lib, const char *path) {
         qsort(book.files, (size_t)book.file_count, sizeof(AudioFile), audiofile_cmp);
         book.cover = find_cover(path);
         if (!book.cover && book.file_count > 0) {
-            /* Try to extract embedded artwork from the first audio file */
+#ifndef SB_A30
+            /* Try to extract embedded artwork from the first audio file.
+               Skipped on SB_A30: opening an AVFormatContext during the scan
+               leaves memory fragmented so the subsequent player_open OOMs. */
             char covpath[1280];
             snprintf(covpath, sizeof(covpath), "%s/cover.jpg", path);
             if (cover_extract_to_file(book.files[0].path, covpath))
                 book.cover = strdup(covpath);
-            else {
+            else
+#endif
+            {
                 /* No embedded/local art — dispatch async API fetch using folder name */
                 const char *sl = strrchr(path, '/');
                 cover_fetch_async(sl ? sl + 1 : path, NULL, path);
@@ -303,12 +308,15 @@ static void scan_dir(MediaLibrary *lib, const char *path) {
                           sizeof(AudioFile), audiofile_cmp);
                     book.cover = find_cover(child);
                     if (!book.cover) {
-                        /* Try to extract embedded artwork from the first audio file */
+#ifndef SB_A30
+                        /* Skipped on SB_A30: same OOM risk as above */
                         char covpath[1280];
                         snprintf(covpath, sizeof(covpath), "%s/cover.jpg", child);
                         if (cover_extract_to_file(book.files[0].path, covpath))
                             book.cover = strdup(covpath);
-                        else {
+                        else
+#endif
+                        {
                             const char *bs = strrchr(child, '/');
                             cover_fetch_async(bs ? bs + 1 : child, NULL, child);
                         }

@@ -205,6 +205,11 @@ static double compute_book_total_dur(const AudioFile *files, int file_count) {
         if (decoder_probe(files[i].path, &pi, NULL, 0) == 0)
             total += pi.duration_sec;
     }
+#ifdef SB_A30
+    /* Return pages freed during probing back to the OS before player_open
+       needs a large contiguous allocation. */
+    malloc_trim(0);
+#endif
     return total;
 }
 
@@ -264,6 +269,13 @@ static void do_book_seek(Player *player, double delta,
 
     while (remaining < 0 && idx > 0) {
         idx--;
+#ifdef SB_A30
+        /* On memory-constrained devices avoid decoder_probe while the current
+           player's demux context is still open — two concurrent FFmpeg contexts
+           exhaust RAM.  Jump to the start of the previous file instead. */
+        remaining = 0;
+        break;
+#else
         ProbeInfo pi = {0};
         if (decoder_probe(files[idx].path, &pi, NULL, 0) != 0) {
             remaining = 0;
@@ -271,6 +283,7 @@ static void do_book_seek(Player *player, double delta,
         }
         *book_offset -= pi.duration_sec;
         remaining += pi.duration_sec;
+#endif
     }
     if (remaining < 0) remaining = 0;
 
@@ -333,7 +346,14 @@ int main(int argc, char *argv[]) {
         config_load_api_keys(api_dir);
     }
 
+    /* SB_A30: display goes directly to fb0 via a30_screen_init — SDL video
+       subsystem is never used.  Initialising it would prevent mmiyoo SDL2
+       (MiyooMini V2/V3) from loading, since that build has no dummy driver. */
+#ifdef SB_A30
+    if (SDL_Init(SDL_INIT_AUDIO) != 0) {
+#else
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) {
+#endif
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError()); return 1;
     }
     if (TTF_Init() != 0) {
@@ -419,6 +439,39 @@ int main(int argc, char *argv[]) {
 
     SDL_Texture *default_folder = theme_render_folder_cover(renderer,
                                                              "resources/default_folder.svg");
+
+    /* Splash screen — visible during media library scan and any first-run setup */
+    {
+        SDL_Texture *splash_icon = IMG_LoadTexture(renderer, "resources/icon.png");
+        SDL_SetRenderDrawColor(renderer, 0x10, 0x10, 0x10, 0xff);
+        SDL_RenderClear(renderer);
+        int icon_size = (int)(80.0f * ui_scale + 0.5f);
+        int icon_y    = win_h / 2 - icon_size / 2 - (int)(20.0f * ui_scale);
+        if (splash_icon) {
+            SDL_Rect dst = { win_w/2 - icon_size/2, icon_y, icon_size, icon_size };
+            SDL_RenderCopy(renderer, splash_icon, NULL, &dst);
+            SDL_DestroyTexture(splash_icon);
+        }
+        SDL_Color white = {0xff, 0xff, 0xff, 0xff};
+        SDL_Surface *tsurf = TTF_RenderUTF8_Blended(font, "StoryBoy loading...", white);
+        if (tsurf) {
+            SDL_Texture *ttex = SDL_CreateTextureFromSurface(renderer, tsurf);
+            if (ttex) {
+                SDL_Rect dst = { win_w/2 - tsurf->w/2,
+                                 icon_y + icon_size + (int)(14.0f * ui_scale),
+                                 tsurf->w, tsurf->h };
+                SDL_RenderCopy(renderer, ttex, NULL, &dst);
+                SDL_DestroyTexture(ttex);
+            }
+            SDL_FreeSurface(tsurf);
+        }
+        SDL_RenderPresent(renderer);
+#ifdef SB_A30
+        a30_flip(hw_surf);
+#elif defined(SB_TRIMUI_BRICK)
+        brick_flip(hw_surf);
+#endif
+    }
 
     printf("Scanning media library...\n");
     MediaLibrary lib;

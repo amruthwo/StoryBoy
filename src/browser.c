@@ -977,10 +977,8 @@ static void draw_season_list(SDL_Renderer *renderer, TTF_Font *font,
             int text_w = win_w - text_x - padding;
 
             char season_label[128];
-            snprintf(season_label, sizeof(season_label), "%s - %d episode%s",
-                     show->seasons[i].name,
-                     show->seasons[i].file_count,
-                     show->seasons[i].file_count == 1 ? "" : "s");
+            snprintf(season_label, sizeof(season_label), "%s",
+                     show->seasons[i].name);
 
             RGB tc = sel ? t->highlight_text : t->text;
             int fh = TTF_FontHeight(font);

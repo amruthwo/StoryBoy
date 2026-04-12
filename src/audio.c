@@ -72,6 +72,25 @@ static int ring_write(AudioRingBuf *r, const uint8_t *src, int len,
 static void audio_callback(void *userdata, Uint8 *stream, int len) {
     AudioCtx    *a = (AudioCtx *)userdata;
 
+#ifdef SB_A30
+    /* Measure actual callback rate to detect hardware rate mismatches.
+       Logs after 20 callbacks (~1–2 s at expected rates). */
+    {
+        int n = (int)atomic_fetch_add(&a->cb_count, 1);
+        if (n == 0)
+            atomic_store(&a->cb_t0, (int)SDL_GetTicks());
+        else if (n == 19) {
+            Uint32 elapsed = (Uint32)SDL_GetTicks() - (Uint32)atomic_load(&a->cb_t0);
+            if (elapsed > 0) {
+                /* 19 intervals between callbacks 0…19 → 19 × AUDIO_SDL_SAMPLES samples */
+                unsigned est = (unsigned)AUDIO_SDL_SAMPLES * 19u * 1000u / elapsed;
+                fprintf(stderr, "audio_callback: 20 calls in %u ms → est_rate=%u Hz "
+                        "(device=%d Hz)\n", elapsed, est, a->out_rate);
+            }
+        }
+    }
+#endif
+
     /* After sleep/wake the A30 ALSA driver fires a storm of underruns while
        it reinitialises.  Each underrun causes the callback to consume ring
        data that ALSA never actually plays, producing drift and pops.
@@ -264,10 +283,34 @@ static int audio_decode_thread(void *userdata) {
     int out_buf_size = 192000; /* 1s at 48kHz stereo S16 — more than enough */
     uint8_t *out_buf = malloc((size_t)out_buf_size);
 
+    /* When chunk-level index is used (Lavf57 stsz-failure recovery), the MOV
+       demuxer stamps each chunk packet with a single DTS covering thousands of
+       AAC frames.  Only the first decoded frame per chunk gets a valid pts from
+       the codec; subsequent frames within the chunk come out AV_NOPTS_VALUE,
+       which would leave the clock frozen between chunk boundaries.
+       Track the expected pts across frames and fill it in when missing. */
+    int64_t inferred_pts    = AV_NOPTS_VALUE;
+    int64_t discard_until   = AV_NOPTS_VALUE; /* fast-forward to seek target */
+    int     log_first_frame = 0;              /* log first decoded frame after each flush */
+
     while (!a->abort) {
+        /* Snapshot flush_gen before blocking in packet_queue_get.  If a new
+           flush sentinel arrives while we're inside the inner decode loop
+           (including while ring_write is blocking on the SDL callback), we
+           detect the change and break out so the outer loop can process the
+           new seek within one SDL callback cycle (~185ms). */
+        int my_flush_gen = atomic_load_explicit(&a->pkt_queue->flush_gen,
+                                                memory_order_relaxed);
         int ret = packet_queue_get(a->pkt_queue, pkt);
         if (ret < 0) break;  /* abort */
         if (ret == 0) {      /* seek-flush sentinel: reset codec + ring + filter */
+            /* pkt->pts carries the exact seek target in stream timebase (set by
+               demux_thread).  We will decode but discard frames whose pts is
+               before that target so the audio resumes at the precise position
+               even though av_seek_frame only lands on a coarse chunk boundary. */
+            discard_until = pkt->pts; /* AV_NOPTS_VALUE = no discard needed */
+            fprintf(stderr, "audio: flush sentinel pkt->pts=%lld → discard_until=%lld\n",
+                    (long long)pkt->pts, (long long)discard_until);
             avcodec_flush_buffers(a->codec_ctx);
             /* Free filter graph — it will be rebuilt with correct format on next frame */
             avfilter_graph_free(&a->filter_graph);
@@ -279,7 +322,14 @@ static int audio_decode_thread(void *userdata) {
             a->ring.filled = a->ring.read_pos = a->ring.write_pos = 0;
             SDL_CondSignal(a->ring.not_full);
             SDL_UnlockMutex(a->ring.mutex);
-            atomic_store(&a->clock_seek_active, 0);
+            /* Keep clock_seek_active=1 while discarding pre-target frames;
+               clear immediately if no discard is needed (fine-grained index). */
+            if (discard_until != AV_NOPTS_VALUE)
+                atomic_store(&a->clock_seek_active, 1);
+            else
+                atomic_store(&a->clock_seek_active, 0);
+            inferred_pts = AV_NOPTS_VALUE;
+            log_first_frame = 1;
             continue;
         }
         if (!pkt->data) {    /* EOS */
@@ -295,6 +345,39 @@ static int audio_decode_thread(void *userdata) {
         while (!a->abort &&
                avcodec_receive_frame(a->codec_ctx, frm) == 0) {
 
+            /* Fill in pts for frames that come out AV_NOPTS_VALUE (happens for
+               frames 2..N within a chunk-level packet).  frm->nb_samples is in
+               audio samples; pkt_timebase is 1/sample_rate for AAC/M4B, so
+               adding nb_samples advances the pts by exactly one frame. */
+            if (frm->pts == AV_NOPTS_VALUE && inferred_pts != AV_NOPTS_VALUE)
+                frm->pts = inferred_pts;
+            if (frm->pts != AV_NOPTS_VALUE)
+                inferred_pts = frm->pts + frm->nb_samples;
+
+            if (log_first_frame) {
+                fprintf(stderr, "audio: first frame after flush frm->pts=%lld discard_until=%lld\n",
+                        (long long)frm->pts, (long long)discard_until);
+                log_first_frame = 0;
+            }
+
+            /* Once we have decoded past the seek target, stop discarding and
+               let normal ring-write / clock-update logic resume.  For files
+               with fine-grained indexes this triggers on the very first frame
+               (discard_until == AV_NOPTS_VALUE after flush → no-op).
+               After writing this frame, break out of the inner loop so the
+               outer loop can pick up any new flush sentinel immediately — on
+               chunk-level files (V2/V3) each chunk is ~128 s, and staying in
+               the inner loop would prevent seeks from being processed for up
+               to ~60 s of real-time playback. */
+            if (discard_until != AV_NOPTS_VALUE &&
+                frm->pts != AV_NOPTS_VALUE &&
+                frm->pts >= discard_until) {
+                fprintf(stderr, "audio: discard released frm->pts=%lld discard_until=%lld\n",
+                        (long long)frm->pts, (long long)discard_until);
+                discard_until = AV_NOPTS_VALUE;
+                atomic_store(&a->clock_seek_active, 0);
+            }
+
             float spd = atomic_load_explicit(&a->speed, memory_order_relaxed);
 
             if (spd > 1.001f) {
@@ -308,6 +391,10 @@ static int audio_decode_thread(void *userdata) {
                 }
                 filter_and_write(a, frm, &out_buf, &out_buf_size);
                 av_frame_unref(frm);
+                /* Check for new seek before continuing (see flush_gen comment above) */
+                if (atomic_load_explicit(&a->pkt_queue->flush_gen,
+                                         memory_order_relaxed) != my_flush_gen)
+                    break;
                 continue;
             }
 
@@ -343,6 +430,13 @@ static int audio_decode_thread(void *userdata) {
                 }
             }
             av_frame_unref(frm);
+            /* Break inner loop if a new flush sentinel has been enqueued while
+               we were decoding / blocked in ring_write.  The outer loop will
+               call packet_queue_get and receive the flush sentinel, ensuring
+               seeks are processed within ~185ms (one SDL callback interval). */
+            if (atomic_load_explicit(&a->pkt_queue->flush_gen,
+                                     memory_order_relaxed) != my_flush_gen)
+                break;
         }
     }
 
@@ -408,8 +502,40 @@ int audio_open(AudioCtx *a, AVCodecParameters *codec_params,
         .userdata = a,
     };
     SDL_AudioSpec got;
+
+#ifdef SB_A30
+    /* MiyooMini V2/V3: the ALSA hw:0,0 driver always runs its DMA at HALF the
+       configured sample rate — confirmed by callback-rate measurements across
+       multiple attempts (requested 48000Hz→DMA 24000Hz, 44100Hz→22050Hz,
+       22050Hz→11025Hz).  Fix: request 44100Hz with no ALLOW so the driver
+       can't negotiate to 48000Hz, then override a->out_rate = got.freq/2
+       (= 22050Hz).  swr outputs at 22050Hz which matches the true DMA rate
+       → correct playback speed with a clean 2:1 integer downsample. */
+    {
+        const char *sb_plat = getenv("SB_PLATFORM");
+        int is_mini = sb_plat && strcmp(sb_plat, "MiyooMini") == 0;
+
+        if (is_mini) {
+            a->dev = SDL_OpenAudioDevice(NULL, 0, &want, &got, 0);
+            if (!a->dev) {
+                a->dev = SDL_OpenAudioDevice(NULL, 0, &want, &got,
+                                             SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
+                fprintf(stderr, "audio_open: MiyooMini ALLOW fallback got=%dHz\n",
+                        got.freq);
+            } else {
+                fprintf(stderr, "audio_open: MiyooMini fixed-rate OK got=%dHz\n",
+                        got.freq);
+            }
+        } else {
+            a->dev = SDL_OpenAudioDevice(NULL, 0, &want, &got,
+                                         SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
+        }
+    }
+#else
     a->dev = SDL_OpenAudioDevice(NULL, 0, &want, &got,
                                  SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
+#endif
+
     if (a->dev == 0) {
         if (errbuf) snprintf(errbuf, (size_t)errbuf_sz,
                              "SDL_OpenAudioDevice: %s", SDL_GetError());
@@ -417,23 +543,57 @@ int audio_open(AudioCtx *a, AVCodecParameters *codec_params,
         avcodec_free_context(&a->codec_ctx);
         return -1;
     }
+#ifdef SB_A30
+    {
+        const char *sb_plat = getenv("SB_PLATFORM");
+        if (sb_plat && strcmp(sb_plat, "MiyooMini") == 0) {
+            /* True DMA rate = got.freq / 2 — override so swr and clock
+               are calibrated to the hardware's actual sample consumption rate */
+            a->out_rate = got.freq / 2;
+            fprintf(stderr, "audio_open: MiyooMini hw_rate=%dHz (got/2, got=%dHz)\n",
+                    a->out_rate, got.freq);
+        } else {
+            a->out_rate = got.freq;
+        }
+    }
+#else
     a->out_rate = got.freq;
+#endif
     fprintf(stderr, "audio_open: want=%dHz got=%dHz fmt=%d ch=%d\n",
             AUDIO_OUT_RATE, got.freq, got.format, got.channels);
 
-    /* Set up swresample: input = file's format, output = S16 stereo at got.freq */
+    /* Set up swresample: input = file's format, output = S16 stereo at got.freq.
+       Use codec_ctx fields (populated by avcodec_open2) rather than codec_params
+       directly: avcodec_open2 resolves AV_SAMPLE_FMT_NONE that limited probesize
+       can leave in codec_params for large files (e.g. 20+ hour M4B on V2/V3). */
+    enum AVSampleFormat in_fmt = a->codec_ctx->sample_fmt;
+    if (in_fmt == AV_SAMPLE_FMT_NONE) {
+        /* Should never happen after avcodec_open2, but guard just in case */
+        fprintf(stderr, "audio_open: sample_fmt NONE after open2, defaulting FLTP\n");
+        in_fmt = AV_SAMPLE_FMT_FLTP;
+    }
+    int in_rate = a->codec_ctx->sample_rate > 0 ? a->codec_ctx->sample_rate
+                                                 : codec_params->sample_rate;
+    /* ch_layout: prefer codec_ctx (set by open2), fall back to codec_params */
+    AVChannelLayout *in_layout = (a->codec_ctx->ch_layout.nb_channels > 0)
+                                 ? &a->codec_ctx->ch_layout
+                                 : &codec_params->ch_layout;
+
+    fprintf(stderr, "audio_open: swr in fmt=%d rate=%d ch=%d → out fmt=S16 rate=%d ch=%d\n",
+            in_fmt, in_rate, in_layout->nb_channels, a->out_rate, AUDIO_OUT_CHANNELS);
+
     AVChannelLayout out_layout;
     av_channel_layout_default(&out_layout, AUDIO_OUT_CHANNELS);
 
     ret = swr_alloc_set_opts2(&a->swr,
-                              &out_layout,           AV_SAMPLE_FMT_S16, a->out_rate,
-                              &codec_params->ch_layout,
-                              (enum AVSampleFormat)codec_params->format,
-                              codec_params->sample_rate,
+                              &out_layout, AV_SAMPLE_FMT_S16, a->out_rate,
+                              in_layout, in_fmt, in_rate,
                               0, NULL);
     av_channel_layout_uninit(&out_layout);
     if (ret < 0 || swr_init(a->swr) < 0) {
         if (errbuf) snprintf(errbuf, (size_t)errbuf_sz, "swr_init failed");
+        fprintf(stderr, "audio_open: swr_init failed (ret=%d fmt=%d rate=%d ch=%d)\n",
+                ret, in_fmt, in_rate, in_layout->nb_channels);
         SDL_CloseAudioDevice(a->dev); a->dev = 0;
         ring_destroy(&a->ring);
         avcodec_free_context(&a->codec_ctx);
@@ -526,20 +686,29 @@ int audio_switch_stream(AudioCtx *a, PacketQueue *pkt_queue,
         return -1;
     }
 
-    /* Reinit swresample for new channel layout / format / rate */
+    /* Reinit swresample — same rationale as audio_open: use codec_ctx fields
+       (post-avcodec_open2) rather than cp->format which may be NONE. */
     swr_free(&a->swr);
-    AVChannelLayout out_layout;
-    av_channel_layout_default(&out_layout, AUDIO_OUT_CHANNELS);
-    ret = swr_alloc_set_opts2(&a->swr,
-                              &out_layout,           AV_SAMPLE_FMT_S16, a->out_rate,
-                              &cp->ch_layout,
-                              (enum AVSampleFormat)cp->format,
-                              cp->sample_rate, 0, NULL);
-    av_channel_layout_uninit(&out_layout);
-    if (ret < 0 || swr_init(a->swr) < 0) {
-        if (errbuf) snprintf(errbuf, (size_t)errbuf_sz, "swr_init failed");
-        avcodec_free_context(&a->codec_ctx);
-        return -1;
+    {
+        enum AVSampleFormat sw_fmt = a->codec_ctx->sample_fmt;
+        if (sw_fmt == AV_SAMPLE_FMT_NONE) sw_fmt = AV_SAMPLE_FMT_FLTP;
+        int sw_rate = a->codec_ctx->sample_rate > 0 ? a->codec_ctx->sample_rate
+                                                     : cp->sample_rate;
+        AVChannelLayout *sw_layout = (a->codec_ctx->ch_layout.nb_channels > 0)
+                                     ? &a->codec_ctx->ch_layout
+                                     : &cp->ch_layout;
+        AVChannelLayout out_layout;
+        av_channel_layout_default(&out_layout, AUDIO_OUT_CHANNELS);
+        ret = swr_alloc_set_opts2(&a->swr,
+                                  &out_layout, AV_SAMPLE_FMT_S16, a->out_rate,
+                                  sw_layout, sw_fmt, sw_rate,
+                                  0, NULL);
+        av_channel_layout_uninit(&out_layout);
+        if (ret < 0 || swr_init(a->swr) < 0) {
+            if (errbuf) snprintf(errbuf, (size_t)errbuf_sz, "swr_init failed");
+            avcodec_free_context(&a->codec_ctx);
+            return -1;
+        }
     }
 
     /* Clear ring buffer, but first subtract the ring's buffered delay from

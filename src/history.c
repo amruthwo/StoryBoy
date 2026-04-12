@@ -328,7 +328,7 @@ void history_draw(SDL_Renderer *renderer, TTF_Font *font,
                 /* Folder name + "Watched" label */
                 char folder[128], info[160];
                 folder_name_of(path, folder, sizeof(folder));
-                snprintf(info, sizeof(info), "%s  \xe2\x9c\x93 Watched", folder);
+                snprintf(info, sizeof(info), "%s  \xe2\x9c\x93 Finished", folder);
                 draw_text(renderer, font_small, info,
                           PADDING * 2,
                           y + PADDING + TTF_FontHeight(font) + 2,

@@ -11,6 +11,7 @@
 #include <malloc.h>  /* malloc_trim */
 #endif
 #include <libavformat/avformat.h>
+#include <libavcodec/avcodec.h>
 #include <libavutil/dict.h>
 
 /* -------------------------------------------------------------------------
@@ -33,11 +34,42 @@ int player_open(Player *p, const char *path, SDL_Renderer *renderer,
     memset(p, 0, sizeof(*p));
     snprintf(p->path, sizeof(p->path), "%s", path);
 
+#ifdef SB_A30
+    /* On memory-constrained devices skip the standalone decoder_probe open.
+       Open demux first, then derive probe info from the already-open fmt_ctx.
+       This saves one full AVFormatContext open/close cycle per player_open,
+       preventing the heap fragmentation that causes OOM on M4B files.
+       malloc_trim(0) returns any glibc-held free pages to the OS first, giving
+       FFmpeg's moov parsing as much contiguous memory as possible. */
+    malloc_trim(0);
+    if (demux_open(&p->demux, path, errbuf, errbuf_sz) < 0)
+        return -1;
+    {
+        AVFormatContext *fmt = p->demux.fmt_ctx;
+        if (fmt->duration != AV_NOPTS_VALUE)
+            p->probe.duration_sec = (double)fmt->duration / AV_TIME_BASE;
+        p->probe.audio_stream_idx = p->demux.audio_stream_idx;
+        if (p->demux.audio_stream_idx >= 0) {
+            AVStream          *as = fmt->streams[p->demux.audio_stream_idx];
+            AVCodecParameters *ap = as->codecpar;
+            p->probe.sample_rate  = ap->sample_rate;
+            p->probe.channels     = ap->ch_layout.nb_channels;
+            const AVCodecDescriptor *cd = avcodec_descriptor_get(ap->codec_id);
+            snprintf(p->probe.audio_codec, sizeof(p->probe.audio_codec),
+                     "%s", cd ? cd->name : "unknown");
+        }
+        for (unsigned int i = 0; i < fmt->nb_streams; i++)
+            if (fmt->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO)
+                p->probe.audio_track_count++;
+        p->probe.num_chapters = (int)fmt->nb_chapters;
+    }
+#else
     if (decoder_probe(path, &p->probe, errbuf, errbuf_sz) < 0)
         return -1;
 
     if (demux_open(&p->demux, path, errbuf, errbuf_sz) < 0)
         return -1;
+#endif
 
     if (p->demux.audio_stream_idx >= 0) {
         AVStream *as = p->demux.fmt_ctx->streams[p->demux.audio_stream_idx];
