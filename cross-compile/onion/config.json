@@ -1,0 +1,6 @@
+{
+	"label": "StoryBoy",
+	"icon": "/mnt/SDCARD/App/StoryBoy/icon.png",
+	"launch": "launch.sh",
+	"description": "Audiobook player"
+}

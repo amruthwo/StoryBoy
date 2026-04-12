@@ -101,6 +101,18 @@ void demux_stop        (DemuxCtx *d);
 void demux_close       (DemuxCtx *d);
 void demux_request_seek(DemuxCtx *d, double target_sec);
 
+/* Background pre-open — start opening a file in a thread so it's ready
+   before the user presses play.
+   demux_preopen_start : begin background open (no-op if already running)
+   demux_preopen_claim : if path matches and open is done, transfer context
+                         into *out and return 1; else return 0
+   demux_preopen_cancel: close unused pre-opened context at app exit */
+void demux_preopen_start (const char *path);
+int  demux_preopen_claim (const char *path, DemuxCtx *out);
+void demux_preopen_cancel(void);
+/* Returns 1 when the background open has finished (success or failure). */
+int  demux_preopen_is_done(void);
+
 /* Advance to the next audio stream. Flushes queued audio packets.
    Returns the new audio_stream_idx. No-op if only one audio stream. */
 int  demux_cycle_audio (DemuxCtx *d);

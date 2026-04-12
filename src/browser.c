@@ -583,22 +583,34 @@ static void generate_series_mosaic(SDL_Renderer *r, MediaLibrary *lib,
     char cover_path[1280];
     snprintf(cover_path, sizeof(cover_path), "%s/cover.jpg", series->path);
 
-    /* If the file already exists (previous run), just wire it up and return */
-    struct stat _st;
-    if (stat(cover_path, &_st) == 0 && _st.st_size > 1024) {
-        if (!series->cover) series->cover = strdup(cover_path);
-        return;
-    }
-
-    if (!SDL_RenderTargetSupported(r)) return;
-
-    /* Count usable textures (non-NULL, or fall back to default_cover) */
+    /* Count real (non-NULL) season textures — must have at least one to proceed */
     int usable = 0;
     for (int i = 0; i < n_season_tex; i++)
         if (season_tex[i]) usable++;
-    if (usable == 0 && !default_cover) return;
-    /* Guard: need at least one texture slot to tile into (avoid % 0) */
-    if (n_season_tex <= 0) return;
+    if (usable == 0 || n_season_tex <= 0) return;
+
+    /* If the file already exists (previous run), reuse it — unless it predates
+       any of its season covers, which means it was generated from placeholder art */
+    struct stat _st;
+    if (stat(cover_path, &_st) == 0 && _st.st_size > 1024) {
+        int stale = 0;
+        for (int s = 0; s < series->season_count && !stale; s++) {
+            if (!series->seasons[s].cover) continue;
+            struct stat ss;
+            if (stat(series->seasons[s].cover, &ss) == 0 &&
+                ss.st_mtime > _st.st_mtime)
+                stale = 1;
+        }
+        if (!stale) {
+            if (!series->cover) series->cover = strdup(cover_path);
+            return;
+        }
+        /* Stale — season covers have been updated since the mosaic was saved.
+           Remove the old file so we regenerate cleanly. */
+        remove(cover_path);
+    }
+
+    if (!SDL_RenderTargetSupported(r)) return;
 
     /* Grid: 2×2 for ≤4 seasons, 3×3 for more */
     int cols = (n_season_tex <= 4) ? 2 : 3;
@@ -1267,6 +1279,32 @@ void browser_init(BrowserState *state, CoverCache *cache,
     cache->season_textures       = NULL;
     cache->season_tex_count      = 0;
     cache->season_tex_folder_idx = -1;
+}
+
+void browser_generate_pending_mosaics(SDL_Renderer *renderer, MediaLibrary *lib,
+                                      SDL_Texture *default_cover) {
+    for (int i = 0; i < lib->folder_count; i++) {
+        MediaFolder *f = &lib->folders[i];
+        if (!f->is_series || f->cover || f->season_count == 0) continue;
+
+        /* Load season cover textures temporarily */
+        SDL_Texture **season_tex = calloc((size_t)f->season_count,
+                                          sizeof(SDL_Texture *));
+        if (!season_tex) continue;
+        int loaded = 0;
+        for (int s = 0; s < f->season_count; s++) {
+            if (f->seasons[s].cover) {
+                season_tex[s] = load_cover(renderer, f->seasons[s].cover);
+                if (season_tex[s]) loaded++;
+            }
+        }
+        if (loaded > 0)
+            generate_series_mosaic(renderer, lib, i,
+                                   season_tex, f->season_count, default_cover);
+        for (int s = 0; s < f->season_count; s++)
+            if (season_tex[s]) SDL_DestroyTexture(season_tex[s]);
+        free(season_tex);
+    }
 }
 
 void browser_draw(SDL_Renderer *renderer, TTF_Font *font, TTF_Font *font_small,

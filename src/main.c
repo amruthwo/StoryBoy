@@ -38,6 +38,59 @@ extern char **environ;
 #define FPS_CAP 60
 #define SCREENSAVER_TIMEOUT_MS (2 * 60 * 1000)  /* 2 minutes of inactivity */
 
+/* -------------------------------------------------------------------------
+ * Background embedded-cover extraction (all SB_A30 armhf builds)
+ *
+ * Inline extraction during library_scan is disabled on all armhf builds: on
+ * SpruceOS it risks OOM; on OnionOS the slow V2/V3 CPU makes scanning take
+ * 30+ seconds.  Instead we spawn extract_cover after the scan completes so
+ * the browser appears immediately and covers arrive in the background.
+ * ---------------------------------------------------------------------- */
+#if defined(SB_A30)
+static void spawn_cover_extraction(const MediaLibrary *lib) {
+    int n = 0;
+    for (int i = 0; i < lib->folder_count; i++) {
+        const MediaFolder *f = &lib->folders[i];
+        if (f->is_series) {
+            for (int s = 0; s < f->season_count; s++)
+                if (!f->seasons[s].cover) n++;
+        } else {
+            if (!f->cover) n++;
+        }
+    }
+    if (n == 0) return;
+
+    const char *bin = "/mnt/SDCARD/App/StoryBoy/bin32/extract_cover";
+    char **args = malloc((size_t)(n + 2) * sizeof(char *));
+    if (!args) return;
+
+    int argc = 0;
+    args[argc++] = (char *)bin;
+    for (int i = 0; i < lib->folder_count; i++) {
+        const MediaFolder *f = &lib->folders[i];
+        if (f->is_series) {
+            for (int s = 0; s < f->season_count; s++)
+                if (!f->seasons[s].cover) args[argc++] = (char *)f->seasons[s].path;
+        } else {
+            if (!f->cover) args[argc++] = (char *)f->path;
+        }
+    }
+    args[argc] = NULL;
+
+    posix_spawn_file_actions_t fa;
+    posix_spawn_file_actions_init(&fa);
+    posix_spawn_file_actions_addopen(&fa, 1, "/dev/null", O_WRONLY, 0);
+    posix_spawn_file_actions_addopen(&fa, 2,
+        "/mnt/SDCARD/App/StoryBoy/extract_cover.log",
+        O_WRONLY | O_CREAT | O_APPEND, 0644);
+    pid_t pid;
+    posix_spawn(&pid, bin, &fa, NULL, args, environ);
+    posix_spawn_file_actions_destroy(&fa);
+    free(args);
+    /* Fire and forget — extract_cover writes cover.jpg files in the background */
+}
+#endif
+
 /* Sleep timer presets: 0 = off, then 10/30/60/120 minutes */
 static const int SLEEP_PRESETS_SEC[] = { 0, 30, 10*60, 30*60, 60*60, 120*60 };
 #define SLEEP_PRESET_COUNT 6
@@ -477,10 +530,75 @@ int main(int argc, char *argv[]) {
     MediaLibrary lib;
     library_scan(&lib);
     printf("Found %d folder(s).\n", lib.folder_count);
+#if defined(SB_A30)
+    spawn_cover_extraction(&lib);
+
+    /* Pre-open the most recently played file behind the splash screen.
+       The SD card is fully dedicated to the open, so the browser appears
+       instantly when done rather than being sluggish. */
+    {
+        ResumeEntry *entries = NULL;
+        int n = resume_load_all(&entries);
+        if (n > 0 && entries[0].path[0]) {
+            const char *preopen_path = entries[0].path;
+            /* Multi-file book: resolve folder + file_idx → audio file path */
+            if (entries[0].file_idx >= 0) {
+                for (int i = 0; i < lib.folder_count; i++) {
+                    MediaFolder *f = &lib.folders[i];
+                    if (strcmp(f->path, entries[0].path) == 0 &&
+                        entries[0].file_idx < f->file_count) {
+                        preopen_path = f->files[entries[0].file_idx].path;
+                        break;
+                    }
+                }
+            }
+            demux_preopen_start(preopen_path);
+
+            /* Update splash text and wait for the open to finish */
+            {
+                SDL_Color white = {0xff, 0xff, 0xff, 0xff};
+                SDL_Texture *splash_icon = IMG_LoadTexture(renderer, "resources/icon.png");
+                int icon_size = (int)(80.0f * ui_scale + 0.5f);
+                int icon_y    = win_h / 2 - icon_size / 2 - (int)(20.0f * ui_scale);
+                int text_y    = icon_y + icon_size + (int)(14.0f * ui_scale);
+
+                while (!demux_preopen_is_done()) {
+                    SDL_SetRenderDrawColor(renderer, 0x10, 0x10, 0x10, 0xff);
+                    SDL_RenderClear(renderer);
+                    if (splash_icon) {
+                        SDL_Rect dst = { win_w/2 - icon_size/2, icon_y,
+                                         icon_size, icon_size };
+                        SDL_RenderCopy(renderer, splash_icon, NULL, &dst);
+                    }
+                    SDL_Surface *tsurf = TTF_RenderUTF8_Blended(
+                        font, "StoryBoy is loading...", white);
+                    if (tsurf) {
+                        SDL_Texture *ttex = SDL_CreateTextureFromSurface(renderer, tsurf);
+                        if (ttex) {
+                            SDL_Rect dst = { win_w/2 - tsurf->w/2, text_y,
+                                             tsurf->w, tsurf->h };
+                            SDL_RenderCopy(renderer, ttex, NULL, &dst);
+                            SDL_DestroyTexture(ttex);
+                        }
+                        SDL_FreeSurface(tsurf);
+                    }
+                    SDL_RenderPresent(renderer);
+#ifdef SB_A30
+                    a30_flip(hw_surf);
+#endif
+                    SDL_Delay(100);
+                }
+                if (splash_icon) SDL_DestroyTexture(splash_icon);
+            }
+        }
+        free(entries);
+    }
+#endif
 
     BrowserState state;
     CoverCache   cache;
     browser_init(&state, &cache, &lib);
+    browser_generate_pending_mosaics(renderer, &lib, default_cover);
     state.layout        = (BrowserLayout)config_get_layout();
     state.season_layout = (BrowserLayout)config_get_season_layout();
 
@@ -1439,6 +1557,7 @@ int main(int argc, char *argv[]) {
     browser_state_free(&state);
     cover_cache_free(&cache);
     library_free(&lib);
+    demux_preopen_cancel();
     if (default_cover)  SDL_DestroyTexture(default_cover);
     if (default_folder) SDL_DestroyTexture(default_folder);
     if (help_cache)     SDL_DestroyTexture(help_cache);

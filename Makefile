@@ -49,6 +49,12 @@ A30_LDFLAGS = -Wl,--start-group \
 A30_SRCS    = $(SRCS) $(SRC_DIR)/a30_screen.c $(SRC_DIR)/glibc_compat.c
 A30_TARGET  = storyboy32
 
+# OnionOS build — same toolchain/flags as A30 but adds -DSB_ONION which
+# lifts the embedded-cover extraction restriction (swap available on OnionOS).
+ONION_CFLAGS  = $(A30_CFLAGS) -DSB_ONION
+ONION_SRCS    = $(A30_SRCS)
+ONION_TARGET  = storyboy_onion32
+
 SB_A30_IMAGE  ?= storyboy-a30
 SB_A30_DEPLOY ?= spruce@192.168.1.62
 SB_A30_PATH   ?= /mnt/SDCARD/App/StoryBoy
@@ -79,9 +85,11 @@ SB_BRICK_IMAGE  ?= storyboy-brick
 SB_BRICK_DEPLOY ?= spruce@192.168.1.45
 SB_BRICK_PATH   ?= /mnt/SDCARD/App/StoryBoy
 
-.PHONY: all clean test miyoo-a30-build miyoo-a30-docker miyoo-a30-package miyoo-a30-deploy \
+.PHONY: all clean test miyoo-a30-build onion-build miyoo-a30-docker miyoo-a30-package miyoo-a30-deploy \
         trimui-brick-build trimui-brick-docker trimui-brick-package trimui-brick-deploy \
-        fetch-cover-a30-build fetch-cover-brick-build universal-package
+        fetch-cover-a30-build fetch-cover-brick-build \
+        extract-cover-a30-build extract-cover-brick-build \
+        universal-package
 
 all: $(TARGET)
 
@@ -97,6 +105,10 @@ test: $(SRCS)
 miyoo-a30-build: $(A30_SRCS)
 	$(A30_CC) $(A30_CFLAGS) -o $(A30_TARGET) $^ $(A30_LDFLAGS)
 	@echo "Built: $(A30_TARGET)"
+
+onion-build: $(ONION_SRCS)
+	$(A30_CC) $(ONION_CFLAGS) -o $(ONION_TARGET) $^ $(A30_LDFLAGS)
+	@echo "Built: $(ONION_TARGET)"
 
 miyoo-a30-docker:
 	docker build -f cross-compile/miyoo-a30/Dockerfile.storyboy \
@@ -182,6 +194,24 @@ fetch-cover-brick-build: src/fetch_cover.c
 	    -lz -lm -static-libgcc
 	@echo "Built: build/fetch_cover64"
 
+extract-cover-a30-build: src/extract_cover.c src/glibc_compat.c
+	$(A30_CC) -Wall -std=c11 -O2 -D_POSIX_C_SOURCE=200809L -DSB_A30 \
+	    -march=armv7-a -mfpu=neon-vfpv3 -mfloat-abi=hard \
+	    $$(pkg-config --cflags libavformat libavutil) \
+	    -o build/extract_cover32 src/extract_cover.c src/glibc_compat.c \
+	    $$(pkg-config --static --libs libavformat libavutil) \
+	    -lm -static-libgcc
+	@echo "Built: build/extract_cover32"
+
+extract-cover-brick-build: src/extract_cover.c
+	$(BRICK_CC) -Wall -std=c11 -O2 -D_POSIX_C_SOURCE=200809L \
+	    -march=armv8-a \
+	    $$(pkg-config --cflags libavformat libavutil) \
+	    -o build/extract_cover64 src/extract_cover.c \
+	    $$(pkg-config --static --libs libavformat libavutil) \
+	    -lm -static-libgcc
+	@echo "Built: build/extract_cover64"
+
 # ---- Universal package ---------------------------------------------------
 
 universal-package: VERSION ?= test
@@ -189,7 +219,8 @@ universal-package:
 	sh cross-compile/universal/package_storyboy_universal.sh $(VERSION)
 
 clean:
-	rm -f $(TARGET) $(A30_TARGET) $(BRICK_TARGET)
+	rm -f $(TARGET) $(A30_TARGET) $(BRICK_TARGET) $(ONION_TARGET)
 	rm -rf build/storyboy32 build/libs32 build/libs32_a30
 	rm -rf build/storyboy64 build/libs64
 	rm -f build/fetch_cover32 build/fetch_cover64
+	rm -f build/extract_cover32 build/extract_cover64

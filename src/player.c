@@ -37,13 +37,15 @@ int player_open(Player *p, const char *path, SDL_Renderer *renderer,
 #ifdef SB_A30
     /* On memory-constrained devices skip the standalone decoder_probe open.
        Open demux first, then derive probe info from the already-open fmt_ctx.
-       This saves one full AVFormatContext open/close cycle per player_open,
-       preventing the heap fragmentation that causes OOM on M4B files.
-       malloc_trim(0) returns any glibc-held free pages to the OS first, giving
-       FFmpeg's moov parsing as much contiguous memory as possible. */
+       Use a pre-opened context if available (started by demux_preopen_start
+       after library scan), otherwise open fresh. */
     malloc_trim(0);
-    if (demux_open(&p->demux, path, errbuf, errbuf_sz) < 0)
-        return -1;
+    if (!demux_preopen_claim(path, &p->demux)) {
+        if (demux_open(&p->demux, path, errbuf, errbuf_sz) < 0)
+            return -1;
+    } else {
+        fprintf(stderr, "player_open: using pre-opened demux\n");
+    }
     {
         AVFormatContext *fmt = p->demux.fmt_ctx;
         if (fmt->duration != AV_NOPTS_VALUE)

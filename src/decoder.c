@@ -1,7 +1,8 @@
 #include "decoder.h"
 #include <stdio.h>
 #include <string.h>
-
+#include <pthread.h>
+#include <stdatomic.h>
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 #include <libavutil/avutil.h>
@@ -478,19 +479,8 @@ int demux_open(DemuxCtx *d, const char *path, char *errbuf, int errbuf_sz) {
     d->audio_stream_idx = av_find_best_stream(d->fmt_ctx, AVMEDIA_TYPE_AUDIO,
                                                -1, -1, NULL, 0);
 
-    fprintf(stderr, "demux_open: %s → nb_streams=%u audio_idx=%d\n",
-            path, d->fmt_ctx->nb_streams, d->audio_stream_idx);
     if (d->audio_stream_idx >= 0) {
         AVStream *das = d->fmt_ctx->streams[d->audio_stream_idx];
-        fprintf(stderr, "demux_open: audio tb=%d/%d start=%lld fmt=%d rate=%d ch=%d "
-                "nb_index=%d nb_frames=%lld\n",
-                das->time_base.num, das->time_base.den,
-                (long long)das->start_time,
-                das->codecpar->format,
-                das->codecpar->sample_rate,
-                das->codecpar->ch_layout.nb_channels,
-                avformat_index_get_entries_count(das),
-                (long long)das->nb_frames);
         if (avformat_index_get_entries_count(das) == 0 && das->nb_frames > 0) {
             fprintf(stderr, "demux_open: nb_index=0 but nb_frames=%lld — "
                     "rebuilding index from stco/stsc/stts\n",
@@ -590,4 +580,67 @@ int demux_chapter_at(const DemuxCtx *d, double pos_sec) {
     }
     /* Past last chapter end — return last chapter */
     return (int)d->fmt_ctx->nb_chapters - 1;
+}
+
+/* -------------------------------------------------------------------------
+ * Background pre-open — start demux_open in a thread so it's ready by
+ * the time the user presses play.  demux_preopen_claim() transfers
+ * ownership to the caller (returns 1) or signals not ready / wrong path (0).
+ * Call demux_preopen_cancel() at app exit if unused.
+ * ---------------------------------------------------------------------- */
+
+static pthread_t     s_preopen_thread;
+static DemuxCtx      s_preopen_ctx;
+static char          s_preopen_path[1024];
+static atomic_int    s_preopen_state; /* 0=idle, 1=running, 2=done, -1=failed */
+
+static void *preopen_worker(void *arg) {
+    (void)arg;
+    char errbuf[256];
+    int r = demux_open(&s_preopen_ctx, s_preopen_path, errbuf, sizeof(errbuf));
+    atomic_store(&s_preopen_state, r == 0 ? 2 : -1);
+    if (r != 0)
+        fprintf(stderr, "demux_preopen: failed: %s\n", errbuf);
+    else
+        fprintf(stderr, "demux_preopen: ready — %s\n", s_preopen_path);
+    return NULL;
+}
+
+void demux_preopen_start(const char *path) {
+    if (atomic_load(&s_preopen_state) != 0) return; /* already running */
+    snprintf(s_preopen_path, sizeof(s_preopen_path), "%s", path);
+    atomic_store(&s_preopen_state, 1);
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+    pthread_create(&s_preopen_thread, &attr, preopen_worker, NULL);
+    pthread_attr_destroy(&attr);
+}
+
+int demux_preopen_claim(const char *path, DemuxCtx *out) {
+    if (atomic_load(&s_preopen_state) != 2) return 0;
+    if (strcmp(path, s_preopen_path) != 0)  return 0;
+    pthread_join(s_preopen_thread, NULL);
+    *out = s_preopen_ctx;
+    memset(&s_preopen_ctx, 0, sizeof(s_preopen_ctx));
+    atomic_store(&s_preopen_state, 0);
+    s_preopen_path[0] = '\0';
+    return 1;
+}
+
+int demux_preopen_is_done(void) {
+    int st = atomic_load(&s_preopen_state);
+    return st == 2 || st == -1;
+}
+
+void demux_preopen_cancel(void) {
+    int st = atomic_load(&s_preopen_state);
+    if (st == 0) return;
+    if (st == 1 || st == 2) {
+        pthread_join(s_preopen_thread, NULL);
+        if (atomic_load(&s_preopen_state) == 2)
+            demux_close(&s_preopen_ctx);
+    }
+    atomic_store(&s_preopen_state, 0);
+    s_preopen_path[0] = '\0';
 }

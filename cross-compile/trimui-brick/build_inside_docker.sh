@@ -21,6 +21,15 @@ aarch64-linux-gnu-gcc -Wall -std=c11 -O2 -D_POSIX_C_SOURCE=200809L \
     -lz -lm -static-libgcc
 echo "Built: fetch_cover64"
 
+echo "=== Compiling extract_cover64 ==="
+aarch64-linux-gnu-gcc -Wall -std=c11 -O2 -D_POSIX_C_SOURCE=200809L \
+    -march=armv8-a \
+    $(pkg-config --cflags libavformat libavutil) \
+    -o "$BUILD/extract_cover64" /storyboy/src/extract_cover.c \
+    $(pkg-config --static --libs libavformat libavutil) \
+    -lm -static-libgcc
+echo "Built: extract_cover64"
+
 echo "=== Collecting shared library dependencies ==="
 # Skip libs the Brick already provides natively.
 SKIP="libc.so libm.so libpthread.so libdl.so librt.so libgcc_s.so ld-linux"

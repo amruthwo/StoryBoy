@@ -84,6 +84,11 @@ typedef struct {
 /* Call after library_scan(). Allocates the cover texture cache slots. */
 void browser_init(BrowserState *state, CoverCache *cache, const MediaLibrary *lib);
 
+/* Generate mosaic covers for series whose season covers are already on disk.
+   Call once after browser_init(), before the first frame. */
+void browser_generate_pending_mosaics(SDL_Renderer *renderer, MediaLibrary *lib,
+                                      SDL_Texture *default_cover);
+
 /* Draw current view. Call every frame. */
 void browser_draw(SDL_Renderer *renderer, TTF_Font *font, TTF_Font *font_small,
                   BrowserState *state, CoverCache *cache, MediaLibrary *lib,

@@ -235,10 +235,12 @@ static void scan_dir(MediaLibrary *lib, const char *path) {
         qsort(book.files, (size_t)book.file_count, sizeof(AudioFile), audiofile_cmp);
         book.cover = find_cover(path);
         if (!book.cover && book.file_count > 0) {
-#ifndef SB_A30
+#if !defined(SB_A30)
             /* Try to extract embedded artwork from the first audio file.
-               Skipped on SB_A30: opening an AVFormatContext during the scan
-               leaves memory fragmented so the subsequent player_open OOMs. */
+               Skipped on all SB_A30 builds (SpruceOS and OnionOS armhf): even
+               with swap, opening one AVFormatContext per book during scan is too
+               slow on V2/V3 hardware.  extract_cover is spawned as a background
+               process after the scan completes instead. */
             char covpath[1280];
             snprintf(covpath, sizeof(covpath), "%s/cover.jpg", path);
             if (cover_extract_to_file(book.files[0].path, covpath))
@@ -308,8 +310,8 @@ static void scan_dir(MediaLibrary *lib, const char *path) {
                           sizeof(AudioFile), audiofile_cmp);
                     book.cover = find_cover(child);
                     if (!book.cover) {
-#ifndef SB_A30
-                        /* Skipped on SB_A30: same OOM risk as above */
+#if !defined(SB_A30)
+                        /* Skipped on all SB_A30 builds: same slow-hardware reason */
                         char covpath[1280];
                         snprintf(covpath, sizeof(covpath), "%s/cover.jpg", child);
                         if (cover_extract_to_file(book.files[0].path, covpath))

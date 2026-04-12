@@ -12,6 +12,10 @@ echo "=== Compiling storyboy32 ==="
 make -C /storyboy miyoo-a30-build
 cp /storyboy/storyboy32 "$BUILD/storyboy32"
 
+echo "=== Compiling storyboy_onion32 ==="
+make -C /storyboy onion-build
+cp /storyboy/storyboy_onion32 "$BUILD/storyboy_onion32"
+
 echo "=== Compiling fetch_cover32 ==="
 arm-linux-gnueabihf-gcc -Wall -std=c11 -O2 -D_POSIX_C_SOURCE=200809L -DSB_A30 \
     -march=armv7-a -mfpu=neon-vfpv3 -mfloat-abi=hard \
@@ -21,9 +25,20 @@ arm-linux-gnueabihf-gcc -Wall -std=c11 -O2 -D_POSIX_C_SOURCE=200809L -DSB_A30 \
     -lz -lm -static-libgcc
 echo "Built: fetch_cover32"
 
+echo "=== Compiling extract_cover32 ==="
+arm-linux-gnueabihf-gcc -Wall -std=c11 -O2 -D_POSIX_C_SOURCE=200809L -DSB_A30 \
+    -march=armv7-a -mfpu=neon-vfpv3 -mfloat-abi=hard \
+    $(pkg-config --cflags libavformat libavutil) \
+    -o "$BUILD/extract_cover32" /storyboy/src/extract_cover.c /storyboy/src/glibc_compat.c \
+    $(pkg-config --static --libs libavformat libavutil) \
+    -lm -static-libgcc
+echo "Built: extract_cover32"
+
 echo "=== Patching GLIBC version symbols ==="
 python3 /storyboy/cross-compile/miyoo-a30/patch_verneed.py "$BUILD/storyboy32"
+python3 /storyboy/cross-compile/miyoo-a30/patch_verneed.py "$BUILD/storyboy_onion32"
 python3 /storyboy/cross-compile/miyoo-a30/patch_verneed.py "$BUILD/fetch_cover32"
+python3 /storyboy/cross-compile/miyoo-a30/patch_verneed.py "$BUILD/extract_cover32"
 
 echo "=== Copying SDL2 shared library ==="
 # lib32/libSDL2-2.0.so.0   — unpatched, for MiyooMini (V2/V3/V4, glibc 2.28+)

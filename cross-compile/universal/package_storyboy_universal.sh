@@ -4,7 +4,8 @@
 # Usage:  sh cross-compile/universal/package_storyboy_universal.sh [VERSION]
 # Output: storyboy_spruce_universal_v<VERSION>.zip  (in the project root)
 #
-# Requires: build/storyboy32, build/storyboy64, build/fetch_cover32, build/fetch_cover64
+# Requires: build/storyboy32, build/storyboy64, build/fetch_cover32, build/fetch_cover64,
+#           build/extract_cover32, build/extract_cover64
 #           build/libs32/, build/libs32_a30/, build/libs64/
 #           cross-compile/universal/launch.sh, config.json
 #           resources/ directory
@@ -35,12 +36,15 @@ mkdir -p "$APP/lib64"
 mkdir -p "$APP/resources"
 
 # Binaries
-cp "$REPO_ROOT/build/storyboy32"    "$APP/bin32/storyboy"
-cp "$REPO_ROOT/build/storyboy64"    "$APP/bin64/storyboy"
-cp "$REPO_ROOT/build/fetch_cover32" "$APP/bin32/fetch_cover"
-cp "$REPO_ROOT/build/fetch_cover64" "$APP/bin64/fetch_cover"
+cp "$REPO_ROOT/build/storyboy32"       "$APP/bin32/storyboy"
+cp "$REPO_ROOT/build/storyboy64"       "$APP/bin64/storyboy"
+cp "$REPO_ROOT/build/fetch_cover32"    "$APP/bin32/fetch_cover"
+cp "$REPO_ROOT/build/fetch_cover64"    "$APP/bin64/fetch_cover"
+cp "$REPO_ROOT/build/extract_cover32"  "$APP/bin32/extract_cover"
+cp "$REPO_ROOT/build/extract_cover64"  "$APP/bin64/extract_cover"
 chmod +x "$APP/bin32/storyboy" "$APP/bin64/storyboy" \
-         "$APP/bin32/fetch_cover" "$APP/bin64/fetch_cover"
+         "$APP/bin32/fetch_cover" "$APP/bin64/fetch_cover" \
+         "$APP/bin32/extract_cover" "$APP/bin64/extract_cover"
 
 # Shared libraries
 # lib32/     — unpatched SDL2 for Mini Flip/V4 (glibc 2.28+)

@@ -101,11 +101,11 @@ static SDL_Texture *extract_embedded_cover(SDL_Renderer *renderer,
  * ---------------------------------------------------------------------- */
 
 SDL_Texture *cover_load(SDL_Renderer *renderer, const char *audio_path) {
-#ifndef SB_A30
-    /* On memory-constrained devices (103MB, no swap) we never call
-       extract_embedded_cover while demux_open already holds an AVFormatContext
-       on the same file — two concurrent contexts on a 600MB+ M4B exhaust RAM.
-       Fall straight through to the local file lookup below. */
+#if !defined(SB_A30)
+    /* On all SB_A30 builds (SpruceOS and OnionOS armhf) skip inline extraction:
+       two concurrent AVFormatContexts risk OOM on SpruceOS, and on OnionOS the
+       slow V2/V3 CPU makes it impractical during playback too.  cover.jpg is
+       written by extract_cover (background process) before the user picks a book. */
     SDL_Texture *tex = extract_embedded_cover(renderer, audio_path);
     if (tex) return tex;
 #endif
