@@ -175,8 +175,4 @@ jobs:
             echo "::error::No zip file found"
             exit 1
           fi
-          # Upload the versioned zip
           gh release upload "${{ steps.release_info.outputs.release_tag }}" "$ZIP" --clobber
-          # Also upload as StoryBoy.zip for a stable download URL
-          cp "$ZIP" StoryBoy.zip
-          gh release upload "${{ steps.release_info.outputs.release_tag }}" StoryBoy.zip --clobber
