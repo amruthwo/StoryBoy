@@ -18,8 +18,8 @@
 |---|---|
 | Miyoo A30 | 640×480, ARMv7. Works great. |
 | Miyoo Flip V1/V2 | 640×480, AArch64. Works great. |
-| Miyoo Mini Flip (V4) | 752×560, ARMv7. Audio via SigmaStar bridge. |
-| Miyoo Mini V2/V3 | 640×480, ARMv7. Video works; audio broken, currently. |
+| Miyoo Mini Flip (V4) | 752×560, ARMv7. Works great. |
+| Miyoo Mini V2/V3 | 640×480, ARMv7. Works great. |
 | TrimUI Brick / Hammer | 1024×768, AArch64. Works great. |
 | TrimUI Smart Pro / Pro S | 1280x720, AArch64. Works great (I think). |
 
