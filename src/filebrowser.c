@@ -6,9 +6,9 @@
 #include <strings.h>
 #include <dirent.h>
 #include <sys/stat.h>
-/* Forward declarations — avoids pulling SDL/curl headers into this file */
+/* Forward declaration — avoids pulling FFmpeg headers into this file.
+   Only used on non-SB_A30 builds (aarch64 inline extraction). */
 extern int  cover_extract_to_file(const char *audio_path, const char *dest_path);
-extern void cover_fetch_async(const char *title, const char *author, const char *book_dir);
 
 /* -------------------------------------------------------------------------
  * Supported audio extensions
@@ -239,25 +239,16 @@ static void scan_dir(MediaLibrary *lib, const char *path) {
 
         qsort(book.files, (size_t)book.file_count, sizeof(AudioFile), audiofile_cmp);
         book.cover = find_cover(path);
-        if (!book.cover && book.file_count > 0) {
 #if !defined(SB_A30)
-            /* Try to extract embedded artwork from the first audio file.
-               Skipped on all SB_A30 builds (SpruceOS and OnionOS armhf): even
-               with swap, opening one AVFormatContext per book during scan is too
-               slow on V2/V3 hardware.  extract_cover is spawned as a background
-               process after the scan completes instead. */
+        /* aarch64 (Brick): extract embedded art inline — fast enough, no OOM risk.
+           Writes cover_embedded.jpg (highest display priority). */
+        if (!book.cover && book.file_count > 0) {
             char covpath[1280];
-            snprintf(covpath, sizeof(covpath), "%s/cover.jpg", path);
+            snprintf(covpath, sizeof(covpath), "%s/cover_embedded.jpg", path);
             if (cover_extract_to_file(book.files[0].path, covpath))
                 book.cover = strdup(covpath);
-            else
-#endif
-            {
-                /* No embedded/local art — dispatch async API fetch using folder name */
-                const char *sl = strrchr(path, '/');
-                cover_fetch_async(sl ? sl + 1 : path, NULL, path);
-            }
         }
+#endif
         library_add_folder(lib, &book);
         closedir(d);
         return;
@@ -314,20 +305,15 @@ static void scan_dir(MediaLibrary *lib, const char *path) {
                     qsort(book.files, (size_t)book.file_count,
                           sizeof(AudioFile), audiofile_cmp);
                     book.cover = find_cover(child);
-                    if (!book.cover) {
 #if !defined(SB_A30)
-                        /* Skipped on all SB_A30 builds: same slow-hardware reason */
+                    /* aarch64 (Brick): extract embedded art inline. */
+                    if (!book.cover) {
                         char covpath[1280];
-                        snprintf(covpath, sizeof(covpath), "%s/cover.jpg", child);
+                        snprintf(covpath, sizeof(covpath), "%s/cover_embedded.jpg", child);
                         if (cover_extract_to_file(book.files[0].path, covpath))
                             book.cover = strdup(covpath);
-                        else
-#endif
-                        {
-                            const char *bs = strrchr(child, '/');
-                            cover_fetch_async(bs ? bs + 1 : child, NULL, child);
-                        }
                     }
+#endif
                     show_add_season(&series, &book);
                 } else {
                     free(book.path); free(book.name); free(book.files);
@@ -392,6 +378,33 @@ void library_scan(MediaLibrary *lib) {
     if (lib->folder_count > 1)
         qsort(lib->folders, (size_t)lib->folder_count,
               sizeof(MediaFolder), mediafolder_cmp);
+}
+
+void library_refresh_covers(MediaLibrary *lib) {
+    for (int i = 0; i < lib->folder_count; i++) {
+        MediaFolder *f = &lib->folders[i];
+        if (f->is_series) {
+            for (int s = 0; s < f->season_count; s++)
+                if (!f->seasons[s].cover && f->seasons[s].path)
+                    f->seasons[s].cover = find_cover(f->seasons[s].path);
+        } else {
+            if (!f->cover && f->path)
+                f->cover = find_cover(f->path);
+        }
+    }
+}
+
+int library_needs_cover_extraction(const MediaLibrary *lib) {
+    for (int i = 0; i < lib->folder_count; i++) {
+        const MediaFolder *f = &lib->folders[i];
+        if (f->is_series) {
+            for (int s = 0; s < f->season_count; s++)
+                if (!f->seasons[s].cover) return 1;
+        } else {
+            if (!f->cover) return 1;
+        }
+    }
+    return 0;
 }
 
 void library_free(MediaLibrary *lib) {

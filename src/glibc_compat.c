@@ -17,6 +17,9 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/syscall.h>
+/* The ARM cross-compiler's unistd.h omits syscall() without _GNU_SOURCE.
+   Declare it explicitly rather than pulling in all GNU extensions. */
+extern long syscall(long number, ...);
 
 /* Bind to the old fcntl@GLIBC_2.4 which exists in glibc 2.23. */
 extern int __fcntl_v4(int fd, int cmd, ...)

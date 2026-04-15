@@ -95,6 +95,45 @@ static void draw_text(SDL_Renderer *r, TTF_Font *font, const char *text,
     SDL_FreeSurface(surf);
 }
 
+/* Render text truncated with "…" if it exceeds max_w pixels. */
+static void draw_text_ellipsis(SDL_Renderer *r, TTF_Font *font, const char *text,
+                               int x, int y, int max_w,
+                               Uint8 R, Uint8 G, Uint8 B) {
+    int tw = 0, th = 0;
+    TTF_SizeUTF8(font, text, &tw, &th);
+    if (tw <= max_w) { draw_text(r, font, text, x, y, max_w, R, G, B); return; }
+
+    int ew = 0;
+    TTF_SizeUTF8(font, "...", &ew, &th);
+    int avail = max_w - ew;
+    if (avail <= 0) return;
+
+    /* Binary search for longest byte prefix whose rendered width ≤ avail.
+       Back up to a valid UTF-8 start byte so we don't split a codepoint. */
+    int len = (int)strlen(text);
+    int lo = 0, hi = len;
+    while (lo < hi) {
+        int mid = (lo + hi + 1) / 2;
+        /* ensure mid is at a UTF-8 codepoint boundary */
+        while (mid > 0 && (text[mid] & 0xC0) == 0x80) mid--;
+        char tmp[512];
+        int n = mid < (int)sizeof(tmp) - 1 ? mid : (int)sizeof(tmp) - 1;
+        memcpy(tmp, text, (size_t)n); tmp[n] = '\0';
+        int mw = 0;
+        TTF_SizeUTF8(font, tmp, &mw, &th);
+        if (mw <= avail) lo = mid; else hi = mid - 1;
+        /* avoid infinite loop if mid snapped below lo */
+        if (mid <= lo && mw > avail) { hi = lo - 1; break; }
+    }
+    if (lo == 0) return;
+    char buf[516];
+    int n = lo < (int)sizeof(buf) - 4 ? lo : (int)sizeof(buf) - 4;
+    memcpy(buf, text, (size_t)n);
+    buf[n] = '\0';
+    memcpy(buf + n, "...", 4); /* includes NUL terminator */
+    draw_text(r, font, buf, x, y, max_w, R, G, B);
+}
+
 /* Slightly darken an RGB value for alternating row tint */
 static Uint8 dim(Uint8 v, int amt) {
     return (v > amt) ? (Uint8)(v - amt) : 0;
@@ -459,7 +498,6 @@ static void draw_folder_grid(SDL_Renderer *renderer, TTF_Font *font,
             int thumb_w = (int)(m.img_h * 4.0f / 3.0f);
             SDL_Texture *cover = get_cover(renderer, cache, lib, i, default_cover);
             if (cover) {
-                int tw, th;
                 int side = (thumb_w < m.img_h) ? thumb_w : m.img_h;
                 SDL_Rect dst = { x + m.padding + (thumb_w - side) / 2,
                                  y + m.padding + (m.img_h  - side) / 2,
@@ -509,11 +547,14 @@ static void draw_folder_grid(SDL_Renderer *renderer, TTF_Font *font,
             {
                 int name_w = 0, dummy = 0;
                 TTF_SizeUTF8(font, lib->folders[i].name, &name_w, &dummy);
-                int name_x = x + (m.tile_w - name_w) / 2;
-                if (name_x < x + 2) name_x = x + 2; /* clamp if wider than tile */
-                draw_text(renderer, font, lib->folders[i].name,
-                          name_x, y + m.img_h + (m.name_h - TTF_FontHeight(font)) / 2,
-                          m.tile_w - 4, tc.r, tc.g, tc.b);
+                int max_label = m.tile_w - 4;
+                /* Centre if it fits; left-align (with 2px margin) if truncated */
+                int name_x = (name_w <= max_label)
+                    ? x + (m.tile_w - name_w) / 2
+                    : x + 2;
+                draw_text_ellipsis(renderer, font, lib->folders[i].name,
+                                   name_x, y + m.img_h + (m.name_h - TTF_FontHeight(font)) / 2,
+                                   max_label, tc.r, tc.g, tc.b);
             }
         }
     }
@@ -583,7 +624,10 @@ static void ensure_season_covers(SDL_Renderer *renderer, CoverCache *cache,
 static void generate_series_mosaic(SDL_Renderer *r, MediaLibrary *lib,
                                     int folder_idx,
                                     SDL_Texture **season_tex, int n_season_tex,
-                                    SDL_Texture *default_cover) {
+                                    SDL_Texture *default_cover,
+                                    const Theme *t) {
+    (void)default_cover;
+    (void)t; /* theme color no longer used — all slots filled with real covers */
     MediaFolder *series = &lib->folders[folder_idx];
     if (!series->is_series) return;
 
@@ -619,34 +663,36 @@ static void generate_series_mosaic(SDL_Renderer *r, MediaLibrary *lib,
 
     if (!SDL_RenderTargetSupported(r)) return;
 
-    /* Grid: 2×2 for ≤4 seasons, 3×3 for more */
-    int cols = (n_season_tex <= 4) ? 2 : 3;
-    int n_tiles = cols * cols;       /* always square grid */
-    int output_size = 512;           /* final cropped square */
-    /* Grid must be > output_size*√2 to fully fill the crop after 45° rotation */
-    int grid_size = (int)(output_size * 1.5f);  /* 768px — comfortable margin */
-    int tile = grid_size / cols;
+    /* Collect real (non-NULL) season covers in order */
+    SDL_Texture **real = malloc((size_t)usable * sizeof(SDL_Texture *));
+    if (!real) return;
+    int rc = 0;
+    for (int i = 0; i < n_season_tex && rc < usable; i++)
+        if (season_tex[i]) real[rc++] = season_tex[i];
+
+    /* Dynamic grid: fewer covers → larger tiles (zoom effect).
+       Always a square grid so the 45° rotation works cleanly.
+       Tiles cycle through real covers — no empty slots, no theme-color fill. */
+    int cols      = (usable == 1) ? 1 : (usable <= 4) ? 2 : 3;
+    int n_tiles   = cols * cols;
+    int output_size = 512;
+    int grid_size   = (int)(output_size * 1.5f);  /* 768px — fills crop after 45° */
+    int tile        = grid_size / cols;
 
     /* --- Step 1: render tiled grid --- */
     SDL_Texture *grid_tex = SDL_CreateTexture(r, SDL_PIXELFORMAT_RGBA8888,
                                                SDL_TEXTUREACCESS_TARGET,
                                                grid_size, grid_size);
-    if (!grid_tex) return;
+    if (!grid_tex) { free(real); return; }
 
     SDL_SetRenderTarget(r, grid_tex);
     SDL_SetRenderDrawColor(r, 18, 18, 18, 255);
     SDL_RenderClear(r);
 
     for (int i = 0; i < n_tiles; i++) {
-        int idx = i % n_season_tex;
-        SDL_Texture *cov = (idx < n_season_tex) ? season_tex[idx] : NULL;
-        if (!cov) cov = default_cover;
-        if (!cov) continue;
-
         int col = i % cols, row_i = i / cols;
         SDL_Rect dst = { col * tile, row_i * tile, tile, tile };
-
-        /* Center-crop the season cover into the tile */
+        SDL_Texture *cov = real[i % usable];  /* cycle — no empty slots */
         int tw = 0, th = 0;
         SDL_QueryTexture(cov, NULL, NULL, &tw, &th);
         SDL_Rect src;
@@ -655,6 +701,7 @@ static void generate_series_mosaic(SDL_Renderer *r, MediaLibrary *lib,
         else               src = (SDL_Rect){ 0, 0, tw, th };
         SDL_RenderCopy(r, cov, &src, &dst);
     }
+    free(real);
 
     /* --- Step 2: rotate 45° into a larger canvas --- */
     float sq2 = 1.41421356f;
@@ -976,11 +1023,13 @@ static void draw_season_list(SDL_Renderer *renderer, TTF_Font *font,
                               dim(t->background.b, 8), 0xff);
             }
 
-            /* Season thumbnail — fall back to show cover if no season-specific art */
+            /* Season thumbnail — fall back to default_cover if no season-specific art.
+               Never inherit the series mosaic: that would make each book look like a
+               series container, which is confusing. */
             SDL_Texture *thumb = (cache->season_textures && i < cache->season_tex_count)
                                  ? cache->season_textures[i] : NULL;
             if (!thumb)
-                thumb = get_cover(renderer, cache, lib, state->folder_idx, default_cover);
+                thumb = default_cover;
             if (thumb) {
                 int tw, th;
                 SDL_QueryTexture(thumb, NULL, NULL, &tw, &th);
@@ -1052,7 +1101,7 @@ static void draw_season_list(SDL_Renderer *renderer, TTF_Font *font,
             SDL_Texture *thumb = (cache->season_textures && i < cache->season_tex_count)
                                  ? cache->season_textures[i] : NULL;
             if (!thumb)
-                thumb = get_cover(renderer, cache, lib, state->folder_idx, default_cover);
+                thumb = default_cover;
             if (thumb) {
                 int tw, th;
                 SDL_QueryTexture(thumb, NULL, NULL, &tw, &th);
@@ -1077,11 +1126,13 @@ static void draw_season_list(SDL_Renderer *renderer, TTF_Font *font,
             {
                 int name_w = 0, dummy = 0;
                 TTF_SizeUTF8(font, show->seasons[i].name, &name_w, &dummy);
-                int name_x = x + (m.tile_w - name_w) / 2;
-                if (name_x < x + 2) name_x = x + 2;
-                draw_text(renderer, font, show->seasons[i].name,
-                          name_x, y + m.img_h + (m.name_h - TTF_FontHeight(font)) / 2,
-                          m.tile_w - 4, tc.r, tc.g, tc.b);
+                int max_label = m.tile_w - 4;
+                int name_x = (name_w <= max_label)
+                    ? x + (m.tile_w - name_w) / 2
+                    : x + 2;
+                draw_text_ellipsis(renderer, font, show->seasons[i].name,
+                                   name_x, y + m.img_h + (m.name_h - TTF_FontHeight(font)) / 2,
+                                   max_label, tc.r, tc.g, tc.b);
             }
         }
     }
@@ -1307,7 +1358,8 @@ void browser_generate_pending_mosaics(SDL_Renderer *renderer, MediaLibrary *lib,
         }
         if (loaded > 0)
             generate_series_mosaic(renderer, lib, i,
-                                   season_tex, f->season_count, default_cover);
+                                   season_tex, f->season_count, default_cover,
+                                   theme_get());
         for (int s = 0; s < f->season_count; s++)
             if (season_tex[s]) SDL_DestroyTexture(season_tex[s]);
         free(season_tex);
@@ -1342,7 +1394,7 @@ void browser_draw(SDL_Renderer *renderer, TTF_Font *font, TTF_Font *font_small,
         if (!lib->folders[state->folder_idx].cover)
             generate_series_mosaic(renderer, lib, state->folder_idx,
                                    cache->season_textures, cache->season_tex_count,
-                                   default_cover);
+                                   default_cover, theme);
         draw_season_list(renderer, font, font_small, state, cache, lib,
                          default_cover, theme, win_w, win_h);
     } else {
@@ -1573,6 +1625,22 @@ void browser_state_free(BrowserState *state) {
     state->file_progress   = NULL;
     state->prog_folder_idx = -1;
     state->prog_season_idx = -1;
+}
+
+void browser_invalidate_season_cache(CoverCache *cache) {
+    /* Free any owned season textures and reset the folder index so
+       ensure_season_covers reloads them on the next draw call.
+       Safe to call even when not currently in VIEW_SEASONS. */
+    if (cache->season_textures) {
+        for (int i = 0; i < cache->season_tex_count; i++) {
+            if (cache->season_textures[i])
+                SDL_DestroyTexture(cache->season_textures[i]);
+        }
+        free(cache->season_textures);
+        cache->season_textures  = NULL;
+        cache->season_tex_count = 0;
+    }
+    cache->season_tex_folder_idx = -1;
 }
 
 void cover_cache_free(CoverCache *cache) {

@@ -135,15 +135,9 @@ int player_open(Player *p, const char *path, SDL_Renderer *renderer,
     char *bslash = strrchr(p->cover_book_dir, '/');
     if (bslash) *bslash = '\0';
 
-    /* Load cover art: embedded → local file → async fetch */
+    /* Load cover art: embedded → local file. Open Library fetch is manual-only
+       (Y button from browser); never triggered automatically on player open. */
     p->cover_tex = cover_load(renderer, path);
-    if (!p->cover_tex) {
-        /* Use folder name as book title — much better API search query than
-           the track filename (e.g. "Brandon Sanderson - Legion" not "Track02") */
-        const char *sl = strrchr(p->cover_book_dir, '/');
-        const char *book_title = sl ? sl + 1 : p->cover_book_dir;
-        cover_fetch_async(book_title, NULL, p->cover_book_dir);
-    }
 
     return 0;
 }

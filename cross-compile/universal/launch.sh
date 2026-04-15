@@ -31,13 +31,19 @@ elif [ "$PLATFORM" = "MiyooMini" ]; then
 fi
 
 # Library path setup.
-# A30 needs its VERNEED-patched SDL2 (glibc 2.23 compat) prepended first.
-# MiyooMini V2/V3 need SpruceOS's mmiyoo SDL2 prepended first so the mmiyoo
-# audio backend is used — our lib32 SDL2 (ALSA) is still appended as fallback
-# for any other .so deps.  All other armhf devices use our lib32 SDL2.
+# A30 / Mini Flip (V4): use lib32_a30 (VERNEED-patched SDL2, glibc 2.23 compat).
+#   Mini Flip's /lib/libm.so.6 is glibc 2.28; unpatched lib32/libSDL2 needs
+#   pow/log/exp@GLIBC_2.29 → SIGSEGV in SDL_Init.  lib32_a30 is already patched.
+#   Mini Flip also needs /customer/lib for libasound.so.2 (ALSA backend).
+# MiyooMini V2/V3: lib32 SDL2 (ALSA) — avoids mmiyoo GPU libs that exhaust RAM.
 if [ "$PLATFORM" = "A30" ]; then
     export LD_LIBRARY_PATH="$APPDIR/lib32_a30:$LIBDIR:/usr/lib:$LD_LIBRARY_PATH"
     export SDL_VIDEODRIVER=dummy
+elif [ "$PLATFORM" = "MiyooMini" ] && [ "$MIYOO_V4" = "1" ]; then
+    # Mini Flip (V4): patched SDL2 + /customer/lib for libasound.so.2
+    export LD_LIBRARY_PATH="$APPDIR/lib32_a30:/customer/lib:$LIBDIR:/usr/lib:$LD_LIBRARY_PATH"
+    export SDL_VIDEODRIVER=dummy
+    echo "V4: using lib32_a30 SDL2 + ALSA via /customer/lib" >> "$LOG"
 elif [ "$PLATFORM" = "MiyooMini" ] && [ "$MIYOO_V4" = "0" ]; then
     # V2/V3: use our lib32 SDL2 (ALSA backend) to avoid loading mmiyoo's GPU libs
     # (libEGL, libGLESv2, libmi_gfx, etc.) which exhaust the ~100MB RAM budget.
@@ -65,10 +71,18 @@ ctl.!default {
 }
 ASOUND_EOF
 elif [ "$PLATFORM" = "MiyooMini" ] && [ "$MIYOO_V4" = "1" ]; then
-    # Miyoo Mini V4 (Mini Flip): libpadsp.so bridges SDL2's OSS calls to the
-    # SigmaStar MI_AO proprietary audio HW. audioserver must stay running.
-    export LD_PRELOAD="/customer/lib/libpadsp.so"
-    export SDL_AUDIODRIVER=dsp
+    # Mini Flip (V4): kill audioserver so ALSA hw:0,0 is free, use ALSA directly.
+    # libpadsp.so (DSP→MI_AO bridge) crashes because its constructor tries to
+    # re-initialise MI_AO which audioserver already owns. ALSA works without it.
+    killall audioserver 2>/dev/null
+    sleep 0.5
+    if pgrep audioserver > /dev/null 2>&1; then
+        echo "V4: audioserver still running after kill" >> "$LOG"
+    else
+        echo "V4: audioserver stopped" >> "$LOG"
+    fi
+    export SDL_AUDIODRIVER=alsa
+    export AUDIODEV=hw:0,0
 elif [ "$PLATFORM" = "MiyooMini" ]; then
     # V2/V3: kill audioserver so ALSA hw:0,0 is free, then use ALSA directly.
     killall audioserver 2>/dev/null
@@ -149,13 +163,31 @@ sleep 0.5
 # parsing (~12MB burst), then stays idle; SD card wear is negligible.
 if [ "$PLATFORM" = "MiyooMini" ] && [ "$MIYOO_V4" = "0" ]; then
     SWAP_FILE="$APPDIR/storyboy.swap"
-    if [ ! -f "$SWAP_FILE" ]; then
-        echo "V2/V3: creating 32MB swap file..." >> "$LOG"
-        dd if=/dev/zero of="$SWAP_FILE" bs=1M count=32 2>/dev/null
+    SWAP_SIZE_BYTES=$(stat -c %s "$SWAP_FILE" 2>/dev/null || echo 0)
+    if [ ! -f "$SWAP_FILE" ] || [ "$SWAP_SIZE_BYTES" -lt 67108864 ]; then
+        rm -f "$SWAP_FILE"
+        echo "V2/V3: creating 64MB swap file..." >> "$LOG"
+        dd if=/dev/zero of="$SWAP_FILE" bs=1M count=64 2>/dev/null
         chmod 600 "$SWAP_FILE"
         mkswap "$SWAP_FILE" >> "$LOG" 2>&1
     fi
     swapon "$SWAP_FILE" 2>/dev/null && echo "V2/V3: swap enabled" >> "$LOG"
+fi
+
+# Mini Flip (V4): 32MB swap to absorb cover extraction memory pressure.
+# The Mini Flip has 103MB RAM with no swap; extraction children get OOM-killed
+# without it.  32MB is enough to cover the moov allocation burst.
+if [ "$PLATFORM" = "MiyooMini" ] && [ "$MIYOO_V4" = "1" ]; then
+    SWAP_FILE="$APPDIR/storyboy.swap"
+    SWAP_SIZE_BYTES=$(stat -c %s "$SWAP_FILE" 2>/dev/null || echo 0)
+    if [ ! -f "$SWAP_FILE" ] || [ "$SWAP_SIZE_BYTES" -lt 67108864 ]; then
+        rm -f "$SWAP_FILE"
+        echo "Mini Flip: creating 64MB swap file..." >> "$LOG"
+        dd if=/dev/zero of="$SWAP_FILE" bs=1M count=64 2>/dev/null
+        chmod 600 "$SWAP_FILE"
+        mkswap "$SWAP_FILE" >> "$LOG" 2>&1
+    fi
+    swapon "$SWAP_FILE" 2>/dev/null && echo "Mini Flip: swap enabled" >> "$LOG"
 fi
 
 # Clear fb0 to black before StoryBoy starts so no stale content is visible.
@@ -164,8 +196,8 @@ dd if=/dev/zero of=/dev/fb0 2>/dev/null || true
 "$BIN" >> "$LOG" 2>&1
 echo "storyboy exited: $?" >> "$LOG"
 
-# V2/V3: disable swap after exit
-if [ "$PLATFORM" = "MiyooMini" ] && [ "$MIYOO_V4" = "0" ]; then
+# Disable swap after exit (V2/V3 and Mini Flip)
+if [ "$PLATFORM" = "MiyooMini" ]; then
     swapoff "$APPDIR/storyboy.swap" 2>/dev/null
 fi
 

@@ -30,6 +30,7 @@
 #include <spawn.h>
 #include <sys/wait.h>
 #include <sys/resource.h>
+#include <malloc.h>
 extern char **environ;
 #elif defined(SB_TRIMUI_BRICK) || defined(SB_TRIMUI_SMART)
 #define SB_HW 1
@@ -47,7 +48,12 @@ extern char **environ;
  * the browser appears immediately and covers arrive in the background.
  * ---------------------------------------------------------------------- */
 #if defined(SB_A30)
-static void spawn_cover_extraction(const MediaLibrary *lib) {
+/* Returns PID of the extract_cover subprocess, or 0 if nothing to extract.
+   preopen_dir: directory of the most recently pre-opened file (may be "").
+   That directory is appended LAST so all other children finish and release
+   memory before the potentially large pre-opened book is attempted. */
+static pid_t spawn_cover_extraction(const MediaLibrary *lib,
+                                    const char *preopen_dir) {
     int n = 0;
     for (int i = 0; i < lib->folder_count; i++) {
         const MediaFolder *f = &lib->folders[i];
@@ -58,23 +64,39 @@ static void spawn_cover_extraction(const MediaLibrary *lib) {
             if (!f->cover) n++;
         }
     }
-    if (n == 0) return;
+    if (n == 0) return 0;
 
     const char *bin = "/mnt/SDCARD/App/StoryBoy/bin32/extract_cover";
     char **args = malloc((size_t)(n + 2) * sizeof(char *));
-    if (!args) return;
+    if (!args) return 0;
 
+    /* Two-pass: non-preopen dirs first, preopen dir last. */
     int argc = 0;
     args[argc++] = (char *)bin;
+    const char *deferred = NULL;
     for (int i = 0; i < lib->folder_count; i++) {
         const MediaFolder *f = &lib->folders[i];
         if (f->is_series) {
-            for (int s = 0; s < f->season_count; s++)
-                if (!f->seasons[s].cover) args[argc++] = (char *)f->seasons[s].path;
+            for (int s = 0; s < f->season_count; s++) {
+                if (!f->seasons[s].cover) {
+                    const char *p = f->seasons[s].path;
+                    if (preopen_dir[0] && strcmp(p, preopen_dir) == 0)
+                        deferred = p;
+                    else
+                        args[argc++] = (char *)p;
+                }
+            }
         } else {
-            if (!f->cover) args[argc++] = (char *)f->path;
+            if (!f->cover) {
+                const char *p = f->path;
+                if (preopen_dir[0] && strcmp(p, preopen_dir) == 0)
+                    deferred = p;
+                else
+                    args[argc++] = (char *)p;
+            }
         }
     }
+    if (deferred) args[argc++] = (char *)deferred;
     args[argc] = NULL;
 
     posix_spawn_file_actions_t fa;
@@ -83,11 +105,27 @@ static void spawn_cover_extraction(const MediaLibrary *lib) {
     posix_spawn_file_actions_addopen(&fa, 2,
         "/mnt/SDCARD/App/StoryBoy/extract_cover.log",
         O_WRONLY | O_CREAT | O_APPEND, 0644);
-    pid_t pid;
+    pid_t pid = 0;
     posix_spawn(&pid, bin, &fa, NULL, args, environ);
     posix_spawn_file_actions_destroy(&fa);
     free(args);
-    /* Fire and forget — extract_cover writes cover.jpg files in the background */
+    return pid;
+}
+
+/* Watcher thread: blocks on waitpid then pushes SDL_USEREVENT (code=1) so
+   the main loop can refresh covers without polling.  SDL_PushEvent is
+   documented thread-safe.  ctx is heap-allocated and freed here. */
+static int cover_watch_thread(void *data) {
+    pid_t pid = *(pid_t *)data;
+    free(data);
+    int wst;
+    waitpid(pid, &wst, 0);
+    SDL_Event ev;
+    SDL_memset(&ev, 0, sizeof(ev));
+    ev.type      = SDL_USEREVENT;
+    ev.user.code = 1;  /* cover extraction complete */
+    SDL_PushEvent(&ev);
+    return 0;
 }
 #endif
 
@@ -531,7 +569,8 @@ int main(int argc, char *argv[]) {
     library_scan(&lib);
     printf("Found %d folder(s).\n", lib.folder_count);
 #if defined(SB_A30)
-    spawn_cover_extraction(&lib);
+    pid_t cover_pid = 0;  /* assigned after demux_preopen so they don't compete for RAM */
+    char preopen_dir[1280] = {0}; /* directory of the pre-opened file; passed to spawn_cover_extraction */
 
     /* Pre-open the most recently played file behind the splash screen.
        The SD card is fully dedicated to the open, so the browser appears
@@ -552,6 +591,11 @@ int main(int argc, char *argv[]) {
                     }
                 }
             }
+            /* Record the directory so spawn_cover_extraction can defer it last. */
+            const char *slash = strrchr(preopen_path, '/');
+            if (slash && (size_t)(slash - preopen_path) < sizeof(preopen_dir))
+                memcpy(preopen_dir, preopen_path, (size_t)(slash - preopen_path));
+
             demux_preopen_start(preopen_path);
 
             /* Update splash text and wait for the open to finish */
@@ -592,6 +636,24 @@ int main(int argc, char *argv[]) {
             }
         }
         free(entries);
+    }
+
+    /* Spawn cover extraction AFTER demux_preopen completes — prevents concurrent
+       FFmpeg moov parsing from exhausting the 103MB RAM on armhf devices.
+       Cancel the preopen context first: its moov data can be 12MB+ for large
+       M4Bs and stays resident throughout extraction, starving the children.
+       Fast-open is sacrificed for this session; covers are more important on
+       first launch.  Restore SIGCHLD to SIG_DFL so the child is not auto-reaped
+       before our watcher thread can call waitpid. */
+    /* Only cancel preopen if there are covers to extract — on subsequent
+       launches (all covers present) extraction is skipped and preopen is
+       kept so the user gets fast-open. */
+    if (library_needs_cover_extraction(&lib)) demux_preopen_cancel();
+    signal(SIGCHLD, SIG_DFL);
+    cover_pid = spawn_cover_extraction(&lib, preopen_dir);
+    if (cover_pid > 0) {
+        pid_t *ctx = malloc(sizeof(pid_t));
+        if (ctx) { *ctx = cover_pid; SDL_CreateThread(cover_watch_thread, "cover_watch", ctx); }
     }
 #endif
 
@@ -673,6 +735,9 @@ int main(int argc, char *argv[]) {
         struct timespec ts_frame_start;
         clock_gettime(CLOCK_MONOTONIC, &ts_frame_start);
 
+/* Cover extraction completion is handled in the SDL event loop via
+   SDL_USEREVENT (code=1) pushed by cover_watch_thread. */
+
 #ifdef SB_HW
         /* Sleep/wake detection */
         if (mode == MODE_PLAYBACK && player.state != PLAYER_STOPPED) {
@@ -716,6 +781,35 @@ int main(int argc, char *argv[]) {
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
             if (ev.type == SDL_QUIT) { running = 0; break; }
+
+#if defined(SB_A30)
+            /* Cover extraction done — refresh covers and regenerate mosaics.
+               Pushed by cover_watch_thread when extract_cover32 exits. */
+            if (ev.type == SDL_USEREVENT && ev.user.code == 1) {
+                signal(SIGCHLD, SIG_IGN);  /* restore auto-reap for fetch_cover */
+                library_refresh_covers(&lib);
+                /* FAT32 mtimes are all zero so the stale-check can't detect new
+                   season covers — delete the old series cover.jpg and clear the
+                   cached texture so mosaics are rebuilt from scratch. */
+                for (int _i = 0; _i < lib.folder_count; _i++) {
+                    MediaFolder *_f = &lib.folders[_i];
+                    if (!_f->is_series) continue;
+                    char _mjpg[1280];
+                    snprintf(_mjpg, sizeof(_mjpg), "%s/cover.jpg", _f->path);
+                    remove(_mjpg);
+                    if (_f->cover && strstr(_f->cover, "cover.jpg")) {
+                        free(_f->cover); _f->cover = NULL;
+                    }
+                    if (_i < cache.count && cache.textures[_i]) {
+                        SDL_DestroyTexture(cache.textures[_i]);
+                        cache.textures[_i] = NULL;
+                    }
+                }
+                browser_invalidate_season_cache(&cache);
+                browser_generate_pending_mosaics(renderer, &lib, default_cover);
+                continue;
+            }
+#endif
 
             if (tutorial.active) {
                 if (ev.type == SDL_KEYDOWN) {
@@ -984,11 +1078,11 @@ int main(int argc, char *argv[]) {
                     }
 
                     if ((act == SDLK_RETURN || act == SDLK_SPACE) && fpath) {
-                        /* A — fetch art: lock out embedded re-extraction so the
-                           Open Library cover persists across restarts */
+                        /* A — fetch art from Open Library.
+                           Clear existing covers so the OL result wins on display.
+                           No sentinel: cover.jpg written by OL fetch will prevent
+                           extract_cover from re-extracting on the next launch. */
                         char covpath[1280];
-                        snprintf(covpath, sizeof(covpath), "%s/.sb_cover_locked", fpath);
-                        { FILE *lf = fopen(covpath, "w"); if (lf) fclose(lf); }
                         snprintf(covpath, sizeof(covpath), "%s/cover.jpg", fpath);
                         remove(covpath);
                         snprintf(covpath, sizeof(covpath), "%s/cover.png", fpath);
@@ -1001,6 +1095,11 @@ int main(int argc, char *argv[]) {
                                 SDL_DestroyTexture(cache.season_textures[si]);
                                 cache.season_textures[si] = NULL;
                             }
+                            /* Series mosaic is now stale — clear it too */
+                            if (fi < cache.count && cache.textures[fi]) {
+                                SDL_DestroyTexture(cache.textures[fi]);
+                                cache.textures[fi] = NULL;
+                            }
                         } else if (fi < cache.count && cache.textures[fi]) {
                             SDL_DestroyTexture(cache.textures[fi]);
                             cache.textures[fi] = NULL;
@@ -1008,11 +1107,12 @@ int main(int argc, char *argv[]) {
                         cover_fetch_async(fname, NULL, fpath);
                         mode = MODE_BROWSER;
                     } else if (act == SDLK_LALT && fpath) {
-                        /* X — clear art: write lock sentinel so extract_cover
-                           does not re-extract embedded art on the next restart */
+                        /* X — clear art. For a flat book or season: removes all
+                           covers; extract_cover re-runs on next launch.
+                           For a series entry: fpath is the series dir, so only
+                           the mosaic cover.jpg is removed; season covers in
+                           subdirectories are untouched. */
                         char covpath[1280];
-                        snprintf(covpath, sizeof(covpath), "%s/.sb_cover_locked", fpath);
-                        { FILE *lf = fopen(covpath, "w"); if (lf) fclose(lf); }
                         snprintf(covpath, sizeof(covpath), "%s/cover.jpg", fpath);
                         remove(covpath);
                         snprintf(covpath, sizeof(covpath), "%s/cover.png", fpath);
@@ -1024,9 +1124,23 @@ int main(int argc, char *argv[]) {
                                 SDL_DestroyTexture(cache.season_textures[si]);
                                 cache.season_textures[si] = NULL;
                             }
+                            /* Series mosaic is now stale — clear it too */
+                            if (fi < cache.count && cache.textures[fi]) {
+                                SDL_DestroyTexture(cache.textures[fi]);
+                                cache.textures[fi] = NULL;
+                            }
                         } else if (fi < cache.count && cache.textures[fi]) {
                             SDL_DestroyTexture(cache.textures[fi]);
                             cache.textures[fi] = NULL;
+                        }
+                        /* Also clear in-memory cover pointer so get_cover
+                           re-polls the filesystem on the next draw frame */
+                        if (is_season) {
+                            free(lib.folders[fi].seasons[si].cover);
+                            lib.folders[fi].seasons[si].cover = NULL;
+                        } else if (fi >= 0 && fi < lib.folder_count) {
+                            free(lib.folders[fi].cover);
+                            lib.folders[fi].cover = NULL;
                         }
                         mode = MODE_BROWSER;
                     } else if (act == SDLK_LCTRL || act == SDLK_BACKSPACE) {

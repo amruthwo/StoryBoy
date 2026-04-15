@@ -48,5 +48,12 @@ typedef struct {
    Caller must call library_free() when done. */
 void library_scan(MediaLibrary *lib);
 
+/* Re-probe cover art for entries that still have cover==NULL.
+   Call after background extraction completes to pick up newly written files. */
+void library_refresh_covers(MediaLibrary *lib);
+
+/* Returns 1 if any book/season is missing a cover and needs extraction. */
+int  library_needs_cover_extraction(const MediaLibrary *lib);
+
 /* Free all memory owned by lib */
 void library_free(MediaLibrary *lib);

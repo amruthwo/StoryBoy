@@ -102,5 +102,10 @@ int browser_handle_event(BrowserState *state, const MediaLibrary *lib,
 /* Free cached cover textures (not the MediaLibrary itself). */
 void cover_cache_free(CoverCache *cache);
 
+/* Invalidate the season texture cache so ensure_season_covers reloads on the
+   next draw.  Call after library_refresh_covers() so newly-written cover
+   files are picked up without requiring a navigation away and back. */
+void browser_invalidate_season_cache(CoverCache *cache);
+
 /* Free heap allocations inside BrowserState (call before exit). */
 void browser_state_free(BrowserState *state);

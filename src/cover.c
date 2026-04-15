@@ -18,10 +18,10 @@ extern char **environ;
  * Embedded artwork extraction
  * ---------------------------------------------------------------------- */
 
-/* Extract the first attached-picture stream from an audio file and return
-   it as an SDL_Texture.  Returns NULL if none found or on error. */
 /* Load an image from an SDL_RWops, scale to 256×256 max, return as texture.
-   freesrc: passed through to SDL_RWclose after load. */
+   freesrc: passed through to SDL_RWclose after load.
+   Only used by extract_embedded_cover (aarch64/Brick builds). */
+#if !defined(SB_A30)
 static SDL_Texture *load_texture_scaled(SDL_Renderer *renderer,
                                         SDL_RWops *rw, int freesrc) {
 #ifdef SB_A30
@@ -41,6 +41,7 @@ static SDL_Texture *load_texture_scaled(SDL_Renderer *renderer,
     return IMG_LoadTexture_RW(renderer, rw, freesrc);
 #endif
 }
+#endif /* !SB_A30 */
 
 /* Load a cover image from a file path, scaled to 256×256 max on SB_A30. */
 static SDL_Texture *load_texture_file_scaled(SDL_Renderer *renderer,
@@ -63,6 +64,7 @@ static SDL_Texture *load_texture_file_scaled(SDL_Renderer *renderer,
 #endif
 }
 
+#if !defined(SB_A30)
 static SDL_Texture *extract_embedded_cover(SDL_Renderer *renderer,
                                             const char *audio_path) {
     AVFormatContext *fmt = NULL;
@@ -95,6 +97,7 @@ static SDL_Texture *extract_embedded_cover(SDL_Renderer *renderer,
     avformat_close_input(&fmt);
     return tex;
 }
+#endif /* !SB_A30 */
 
 /* -------------------------------------------------------------------------
  * Public API
