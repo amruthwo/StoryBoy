@@ -121,9 +121,10 @@ miyoo-a30-package: VERSION ?= test
 miyoo-a30-package:
 	sh cross-compile/miyoo-a30/package_storyboy_a30.sh $(VERSION)
 
-miyoo-a30-deploy: build/storyboy32
+miyoo-a30-deploy: build/storyboy32 build/extract_cover32
 	ssh $(SB_A30_DEPLOY) "mkdir -p $(SB_A30_PATH)/lib32 $(SB_A30_PATH)/lib32_a30 $(SB_A30_PATH)/resources/fonts"
 	scp build/storyboy32 $(SB_A30_DEPLOY):$(SB_A30_PATH)/bin32/storyboy
+	scp build/extract_cover32 $(SB_A30_DEPLOY):$(SB_A30_PATH)/bin32/extract_cover
 	scp -r build/libs32/. $(SB_A30_DEPLOY):$(SB_A30_PATH)/lib32/
 	scp -r build/libs32_a30/. $(SB_A30_DEPLOY):$(SB_A30_PATH)/lib32_a30/
 	scp cross-compile/universal/launch.sh \
@@ -195,7 +196,7 @@ fetch-cover-brick-build: src/fetch_cover.c
 	@echo "Built: build/fetch_cover64"
 
 extract-cover-a30-build: src/extract_cover.c src/glibc_compat.c
-	$(A30_CC) -Wall -std=c11 -O2 -D_POSIX_C_SOURCE=200809L -DSB_A30 \
+	$(A30_CC) -Wall -std=c11 -O2 -D_POSIX_C_SOURCE=200809L -D_FILE_OFFSET_BITS=64 -DSB_A30 \
 	    -march=armv7-a -mfpu=neon-vfpv3 -mfloat-abi=hard \
 	    $$(pkg-config --cflags libavformat libavutil) \
 	    -o build/extract_cover32 src/extract_cover.c src/glibc_compat.c \
@@ -204,7 +205,7 @@ extract-cover-a30-build: src/extract_cover.c src/glibc_compat.c
 	@echo "Built: build/extract_cover32"
 
 extract-cover-brick-build: src/extract_cover.c
-	$(BRICK_CC) -Wall -std=c11 -O2 -D_POSIX_C_SOURCE=200809L \
+	$(BRICK_CC) -Wall -std=c11 -O2 -D_POSIX_C_SOURCE=200809L -D_FILE_OFFSET_BITS=64 \
 	    -march=armv8-a \
 	    $$(pkg-config --cflags libavformat libavutil) \
 	    -o build/extract_cover64 src/extract_cover.c \
