@@ -29,7 +29,7 @@
 
 1. Download the latest release zip from the [Releases](../../releases) page.
 2. Extract the zip to your SD card — make sure you have a `/mnt/SDCARD/App/StoryBoy/` folder.
-3. Launch from the app menu.
+3. Boot up your devices and launch **StoryBoy** from the app menu.
 
 On first launch, StoryBoy scans your media folders and builds its library. Make sure your audiobook files are in `/mnt/SDCARD/Media/Audiobooks/`.  StoryBoy uses folders to define audiobooks, so each book will need its own folder, but they can be nested by series.  This was a compromise in order to support audiobooks that are split up between multiple .mp3 files.   
 
