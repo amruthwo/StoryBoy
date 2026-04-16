@@ -22,6 +22,10 @@ mkdir -p "$HOME"
 # Audio: OSS (/dev/dsp) confirmed present on NextUI Brick — matches SpruceOS behaviour.
 export SDL_AUDIODRIVER=dsp
 
+# Use NextUI's system font (Rounded Mplus 1c Bold) if present; falls back to
+# bundled DejaVuSans automatically if the path doesn't exist.
+export SB_FONT_PATH="/mnt/SDCARD/.system/res/font1.ttf"
+
 # Battery: scan sysfs for a Battery-type power supply
 SB_BATTERY_PATH=""
 for bat_dir in /sys/class/power_supply/*/; do

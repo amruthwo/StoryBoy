@@ -24,9 +24,11 @@ PAK="$STAGE/Tools/tg5040/StoryBoy.pak"
 echo "=== Packaging StoryBoy NextUI ${VERSION} ==="
 
 rm -rf "$STAGE"
-mkdir -p "$PAK/bin64"
-mkdir -p "$PAK/lib64"
-mkdir -p "$PAK/resources"
+# tg5050 (Smart Pro S) needs its own copy — NextUI only loads from the device's own folder
+PAK5050="$STAGE/Tools/tg5050/StoryBoy.pak"
+mkdir -p "$PAK/bin64"   "$PAK5050/bin64"
+mkdir -p "$PAK/lib64"   "$PAK5050/lib64"
+mkdir -p "$PAK/resources" "$PAK5050/resources"
 
 # Main binary
 cp "$REPO_ROOT/build/storyboy64"       "$PAK/bin64/storyboy"
@@ -56,7 +58,10 @@ cp "$REPO_ROOT/cross-compile/universal/config.json" "$PAK/config.json"
 cp "$REPO_ROOT/resources/icon.png" "$PAK/"
 cp -r "$REPO_ROOT/resources/." "$PAK/resources/"
 
-# Create zip — contents: Tools/tg5040/StoryBoy.pak/...
+# tg5050 (Smart Pro S) — identical contents
+cp -r "$PAK/." "$PAK5050/"
+
+# Create zip — contents: Tools/tg5040/StoryBoy.pak/ + Tools/tg5050/StoryBoy.pak/
 cd "$STAGE"
 rm -f "$OUT_ZIP"
 zip -r "$OUT_ZIP" Tools/

@@ -206,17 +206,24 @@ void help_draw(SDL_Renderer *r, TTF_Font *font, TTF_Font *font_small,
 
     draw_dim(r, win_w, win_h);
 
-    /* Panel — tall enough for 13 playback rows */
     int px = sc(20, win_w);
     int pw = win_w - px * 2;
-    int ph = sc_h(390, win_h);
+
+    /* Compute font metrics first so the panel can size itself to fit */
+    int fy    = TTF_FontHeight(font);
+    int fsy   = TTF_FontHeight(font_small);
+    int row_h = fsy * 10 / 7;   /* scaled OVL_ROW_H: 20px at base 14px font */
+
+    /* Header area: top-pad + title + div + col-header + div */
+    int header_area = sc(10, win_h) + fy + 6 + 5 + fsy + 4 + 5;
+    int footer_area = sc_h(24, win_h);
+    int ph = header_area + N_PB * row_h + footer_area;
+    /* Don't exceed the window */
+    if (ph > win_h - sc(20, win_h)) ph = win_h - sc(20, win_h);
     int py = (win_h - ph) / 2;
     panel_bg(r, px, py, pw, ph, theme);
 
     /* Title */
-    int fy  = TTF_FontHeight(font);
-    int fsy = TTF_FontHeight(font_small);
-    int row_h = fsy * 10 / 7;   /* scaled OVL_ROW_H: 20px at base 14px font */
     int ty  = py + sc(10, win_h);
     text_ctr(r, font, "Controls Reference",
              win_w / 2, ty,

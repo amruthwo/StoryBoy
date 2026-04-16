@@ -507,8 +507,18 @@ int main(int argc, char *argv[]) {
     { float hs = win_h / 480.0f; if (hs < ui_scale) ui_scale = hs; }
     int font_sz  = (int)(18.0f * ui_scale + 0.5f);
     int font_ssz = (int)(14.0f * ui_scale + 0.5f);
-    TTF_Font *font       = TTF_OpenFont("resources/fonts/DejaVuSans.ttf", font_sz);
-    TTF_Font *font_small = TTF_OpenFont("resources/fonts/DejaVuSans.ttf", font_ssz);
+    const char *font_path = getenv("SB_FONT_PATH");
+    if (!font_path || !font_path[0]) font_path = "resources/fonts/DejaVuSans.ttf";
+    TTF_Font *font       = TTF_OpenFont(font_path, font_sz);
+    TTF_Font *font_small = TTF_OpenFont(font_path, font_ssz);
+    /* Fall back to bundled font if the custom path failed */
+    if (!font || !font_small) {
+        TTF_CloseFont(font); TTF_CloseFont(font_small);
+        font_path = "resources/fonts/DejaVuSans.ttf";
+        font       = TTF_OpenFont(font_path, font_sz);
+        font_small = TTF_OpenFont(font_path, font_ssz);
+    }
+    fprintf(stderr, "font: %s\n", font_path);
 
     if (!renderer || !font || !font_small) {
         fprintf(stderr, "Init error: %s / %s\n", SDL_GetError(), TTF_GetError());
