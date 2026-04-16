@@ -30,8 +30,8 @@
 1. Download the latest release zip from the [Releases](../../releases) page.
 2. Extract the zip to your SD card — make sure you have a `/mnt/SDCARD/App/StoryBoy/` folder for SpruceOS/OnionOS.
 
-Or `/mnt/SDCARD/Tools/tg5040/StoryBoy.pak` for Brick/TSP running NextUI,
-`.../Tools/tg5050/StoryBoy.pak` for TSPS running NextUI.
+  Or `/mnt/SDCARD/Tools/tg5040/StoryBoy.pak` for Brick/TSP running NextUI,
+  `.../Tools/tg5050/StoryBoy.pak` for TSPS running NextUI.
    
 3. Boot up your devices and launch **StoryBoy** from the app menu.
 
