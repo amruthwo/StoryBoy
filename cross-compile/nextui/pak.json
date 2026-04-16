@@ -1,0 +1,12 @@
+{
+  "name": "StoryBoy",
+  "type": "TOOL",
+  "description": "Audiobook player with cover art, chapter navigation, and sleep timer",
+  "author": "amruthwo",
+  "repo_url": "https://github.com/amruthwo/StoryBoy",
+  "release_filename": "StoryBoy.pak.zip",
+  "platforms": [
+    "tg5040",
+    "tg5050"
+  ]
+}

@@ -149,13 +149,13 @@ jobs:
           if [ "${{ steps.release_info.outputs.is_tag }}" = "true" ]; then
             gh release create "${{ steps.release_info.outputs.release_tag }}" \
               --title "StoryBoy ${{ steps.release_info.outputs.release_tag }}" \
-              --notes "StoryBoy ${{ steps.release_info.outputs.release_tag }} — builds for SpruceOS (universal) and OnionOS." \
+              --notes "StoryBoy ${{ steps.release_info.outputs.release_tag }} — builds for SpruceOS (universal), OnionOS, and NextUI." \
               2>/dev/null || true
           else
             gh release view latest >/dev/null 2>&1 || \
               gh release create latest \
                 --title "Latest Build" \
-                --notes "StoryBoy latest build — SpruceOS (universal) and OnionOS." \
+                --notes "StoryBoy latest build — SpruceOS (universal), OnionOS, and NextUI." \
               || true
           fi
 
@@ -173,14 +173,19 @@ jobs:
         run: |
           sh cross-compile/onion/package_storyboy_onion.sh "${{ steps.release_info.outputs.version }}"
 
+      - name: Package NextUI zip
+        run: |
+          sh cross-compile/nextui/package_storyboy_nextui.sh "${{ steps.release_info.outputs.version }}"
+
       - name: Upload to release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           SPRUCE_ZIP=$(ls storyboy_spruce_universal_v*.zip 2>/dev/null | head -1)
           ONION_ZIP=$(ls storyboy_onion_v*.zip 2>/dev/null | head -1)
-          if [ -z "$SPRUCE_ZIP" ] || [ -z "$ONION_ZIP" ]; then
-            echo "::error::Missing zip(s): spruce=${SPRUCE_ZIP} onion=${ONION_ZIP}"
+          NEXTUI_ZIP=$(ls storyboy_nextui_v*.zip 2>/dev/null | head -1)
+          if [ -z "$SPRUCE_ZIP" ] || [ -z "$ONION_ZIP" ] || [ -z "$NEXTUI_ZIP" ]; then
+            echo "::error::Missing zip(s): spruce=${SPRUCE_ZIP} onion=${ONION_ZIP} nextui=${NEXTUI_ZIP}"
             exit 1
           fi
-          gh release upload "${{ steps.release_info.outputs.release_tag }}" "$SPRUCE_ZIP" "$ONION_ZIP" --clobber
+          gh release upload "${{ steps.release_info.outputs.release_tag }}" "$SPRUCE_ZIP" "$ONION_ZIP" "$NEXTUI_ZIP" --clobber

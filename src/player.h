@@ -29,10 +29,7 @@ typedef struct {
     int          osd_visible;
     Uint32       osd_hide_at;  /* SDL_GetTicks() value when OSD should hide */
 
-    /* Volume (mirrors audio.volume; kept here for OSD drawing) */
     float        volume;           /* 0.0–1.0 */
-    int          vol_osd_visible;
-    Uint32       vol_osd_hide_at;
 
     /* Brightness — 1.0 = full, 0.0 = black (SDL overlay dimming) */
     float        brightness;

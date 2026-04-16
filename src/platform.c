@@ -88,7 +88,6 @@ char g_python_bin[512]  = "";
 char g_python_home[512] = "";
 char g_battery_path[256]= "";
 char g_app_dir[512]     = "";
-int  g_hw_has_volume_osd = 0;
 
 void platform_init_from_env(void) {
     /* --- 1. Fast platform detection via SB_PLATFORM env var --- */
@@ -96,7 +95,6 @@ void platform_init_from_env(void) {
     if (plat_str && !g_detected) {
         if (!strcmp(plat_str, "Brick")) {
             g_platform = PLATFORM_BRICK;
-            g_hw_has_volume_osd = 1; /* Brick has its own hardware volume OSD */
         } else if (!strcmp(plat_str, "Flip")) {
             g_platform = PLATFORM_FLIP; /* Flip shares Brick HW but has no hw volume OSD */
         } else if (!strcmp(plat_str, "A30"))         g_platform = PLATFORM_A30;

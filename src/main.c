@@ -130,8 +130,8 @@ static int cover_watch_thread(void *data) {
 #endif
 
 /* Sleep timer presets: 0 = off, then 10/30/60/120 minutes */
-static const int SLEEP_PRESETS_SEC[] = { 0, 30, 10*60, 30*60, 60*60, 120*60 };
-#define SLEEP_PRESET_COUNT 6
+static const int SLEEP_PRESETS_SEC[] = { 0, 10*60, 30*60, 60*60, 120*60 };
+#define SLEEP_PRESET_COUNT 5
 static inline int sc(int base, int w) { return (int)(base * w / 640.0f + 0.5f); }
 
 static void fill_rounded_rect_main(SDL_Renderer *r,

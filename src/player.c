@@ -180,8 +180,6 @@ void player_set_volume(Player *p, float vol) {
     if (vol > 1.0f) vol = 1.0f;
     p->volume = vol;
     atomic_store(&p->audio.volume, vol);
-    p->vol_osd_visible = 1;
-    p->vol_osd_hide_at = SDL_GetTicks() + 1500;
 }
 
 /* SpruceOS uses 20 equal steps (1/20 = 0.05) for hardware VOL keys. */
@@ -373,7 +371,6 @@ int player_update(Player *p) {
     if (p->osd_visible && p->state == PLAYER_PLAYING && now >= p->osd_hide_at)
         p->osd_visible = 0;
 
-    if (p->vol_osd_visible   && now >= p->vol_osd_hide_at)   p->vol_osd_visible   = 0;
     if (p->bri_osd_visible   && now >= p->bri_osd_hide_at)   p->bri_osd_visible   = 0;
     if (p->audio_osd_visible && now >= p->audio_osd_hide_at) p->audio_osd_visible = 0;
     if (p->speed_osd_visible && now >= p->speed_osd_hide_at) p->speed_osd_visible = 0;
@@ -671,17 +668,6 @@ static void draw_indicator_bar(SDL_Renderer *r, TTF_Font *font,
               0xff, 0xff, 0xff);
 }
 
-static void draw_volume_bar(SDL_Renderer *r, TTF_Font *font,
-                            const Player *p, const Theme *t, int win_w) {
-    int pad   = sc(8, win_w);
-    int seg_w = sc(14, win_w);
-    int gap   = sc(3,  win_w);
-    int box_w = 10 * (seg_w + gap) - gap + pad * 4 + sc(46, win_w);
-    int box_x = win_w - box_w - pad * 2;
-    draw_indicator_bar(r, font, t, "VOL", p->volume,
-                       box_x, statusbar_height(win_w) + pad, win_w);
-}
-
 static void draw_brightness_bar(SDL_Renderer *r, TTF_Font *font,
                                 const Player *p, const Theme *t, int win_w) {
     int pad = sc(8, win_w);
@@ -789,14 +775,6 @@ void player_draw(SDL_Renderer *r, TTF_Font *font, TTF_Font *font_small,
         SDL_RenderFillRect(r, &full);
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_NONE);
     }
-
-    /* Volume bar */
-#ifdef SB_TRIMUI_BRICK
-    if (!g_hw_has_volume_osd && p->vol_osd_visible)
-#else
-    if (p->vol_osd_visible)
-#endif
-        draw_volume_bar(r, font, p, t, win_w);
 
     /* Brightness bar */
     if (p->bri_osd_visible)

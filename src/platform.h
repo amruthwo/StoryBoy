@@ -40,9 +40,5 @@ extern char g_python_home[512];
 extern char g_battery_path[256];
 extern char g_app_dir[512];     /* absolute path to app directory (dirname of dirname of exe) */
 
-/* 1 if the device has its own hardware volume OSD (Brick only).
-   When true, GVU suppresses its software volume bar to avoid duplication. */
-extern int g_hw_has_volume_osd;
-
 /* Call once at startup, before any screen_init(). */
 void platform_init_from_env(void);

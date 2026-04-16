@@ -1,4 +1,5 @@
 #include "cover.h"
+#include "platform.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -178,15 +179,18 @@ void cover_fetch_async(const char *title, const char *author,
                        const char *book_dir) {
     if (!title || !title[0] || !book_dir || !book_dir[0]) return;
 
-    /* Resolve fetch_cover binary path relative to this executable */
+    /* Resolve fetch_cover binary path relative to the app directory.
+       g_app_dir is derived from /proc/self/exe at runtime so it works
+       regardless of firmware install path (SpruceOS, OnionOS, NextUI…). */
+    char bin_buf[600];
 #if defined(SB_A30)
-    const char *bin = "/mnt/SDCARD/App/StoryBoy/bin32/fetch_cover";
+    snprintf(bin_buf, sizeof(bin_buf), "%s/bin32/fetch_cover", g_app_dir);
 #elif defined(SB_TRIMUI_BRICK) || defined(SB_TRIMUI_SMART)
-    const char *bin = "/mnt/SDCARD/App/StoryBoy/bin64/fetch_cover";
+    snprintf(bin_buf, sizeof(bin_buf), "%s/bin64/fetch_cover", g_app_dir);
 #else
-    /* Desktop / test build: look next to the storyboy binary */
-    const char *bin = "./fetch_cover";
+    snprintf(bin_buf, sizeof(bin_buf), "./fetch_cover");
 #endif
+    const char *bin = bin_buf;
 
 #if defined(SB_A30)
     /* posix_spawn — non-blocking, preferred on embedded hardware */
@@ -199,13 +203,14 @@ void cover_fetch_async(const char *title, const char *author,
         args[argc++] = (char *)author;
     args[argc] = NULL;
 
+    char log_buf[600];
+    snprintf(log_buf, sizeof(log_buf), "%s/fetch_cover.log", g_app_dir);
     posix_spawn_file_actions_t fa;
     posix_spawn_file_actions_init(&fa);
     /* Redirect stdout to /dev/null; stderr to log for diagnostics */
     posix_spawn_file_actions_addopen(&fa, 1, "/dev/null", O_WRONLY, 0);
     posix_spawn_file_actions_addopen(&fa, 2,
-        "/mnt/SDCARD/App/StoryBoy/fetch_cover.log",
-        O_WRONLY | O_CREAT | O_APPEND, 0644);
+        log_buf, O_WRONLY | O_CREAT | O_APPEND, 0644);
 
     pid_t pid;
     posix_spawn(&pid, bin, &fa, NULL, args, environ);
@@ -216,8 +221,14 @@ void cover_fetch_async(const char *title, const char *author,
     pid_t pid = fork();
     if (pid == 0) {
         /* child */
-        int devnull = open("/dev/null", 1);
-        if (devnull >= 0) { dup2(devnull, 1); dup2(devnull, 2); close(devnull); }
+        char log_path[600];
+        snprintf(log_path, sizeof(log_path), "%s/fetch_cover.log", g_app_dir);
+        int devnull = open("/dev/null", O_WRONLY);
+        int logfd   = open(log_path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+        if (devnull >= 0) dup2(devnull, 1);
+        if (logfd   >= 0) dup2(logfd,   2);
+        if (devnull >= 0) close(devnull);
+        if (logfd   >= 0) close(logfd);
         if (author && author[0])
             execl(bin, bin, book_dir, title, author, (char *)NULL);
         else

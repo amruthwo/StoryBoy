@@ -89,7 +89,7 @@ SB_BRICK_PATH   ?= /mnt/SDCARD/App/StoryBoy
         trimui-brick-build trimui-brick-docker trimui-brick-package trimui-brick-deploy \
         fetch-cover-a30-build fetch-cover-brick-build \
         extract-cover-a30-build extract-cover-brick-build \
-        universal-package
+        universal-package nextui-package
 
 all: $(TARGET)
 
@@ -218,6 +218,10 @@ extract-cover-brick-build: src/extract_cover.c
 universal-package: VERSION ?= test
 universal-package:
 	sh cross-compile/universal/package_storyboy_universal.sh $(VERSION)
+
+nextui-package: VERSION ?= test
+nextui-package:
+	sh cross-compile/nextui/package_storyboy_nextui.sh $(VERSION)
 
 clean:
 	rm -f $(TARGET) $(A30_TARGET) $(BRICK_TARGET) $(ONION_TARGET)
