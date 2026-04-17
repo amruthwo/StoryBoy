@@ -125,7 +125,7 @@ RUN wget -q https://ffmpeg.org/releases/ffmpeg-7.1.3.tar.gz && \
         --arch=aarch64 --target-os=linux \
         --cross-prefix=$CROSS- \
         --enable-cross-compile \
-        --cpu=cortex-a55 \
+        --cpu=cortex-a53 \
         --enable-runtime-cpudetect \
         --prefix=$PREFIX \
         --enable-static --disable-shared \
